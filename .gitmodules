@@ -1,0 +1,3 @@
+[submodule "Submodules/FFmpeg-iOS"]
+	path = Submodules/FFmpeg-iOS
+	url = git@github.com:chrisballinger/FFmpeg-iOS.git
