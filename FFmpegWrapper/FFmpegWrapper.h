@@ -36,10 +36,12 @@
 typedef void(^FFmpegWrapperCompletionBlock)(BOOL success, NSError *error);
 
 /**
- This callback periodically reports on the progress of the job. Defaults to the main queue. **Currently unused!**
- @param progress The estimated progress until the current job is complete, valid values range from [0.0, 1.0].
+ This callback periodically reports on the progress of the job. Defaults to the main queue.
+ @param bytesRead Number of bytes just read from the input file.
+ @param totalBytesRead Total number of bytes read so far.
+ @param totalBytesExpectedToRead Expected number of bytes to be read from input file.
  */
-typedef void(^FFmpegWrapperProgressBlock)(double progress);
+typedef void(^FFmpegWrapperProgressBlock)(NSUInteger bytesRead, unsigned long long totalBytesRead, unsigned long long totalBytesExpectedToRead);
 
 ///-------------------------------------------------
 /// @name Options

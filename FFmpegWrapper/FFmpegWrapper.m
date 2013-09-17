@@ -88,6 +88,18 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
     dispatch_async(conversionQueue, ^{
         BOOL success = NO;
         NSError *error = nil;
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        NSDictionary *inputFileAttributes = [fileManager attributesOfItemAtPath:inputPath error:&error];
+        if (error) {
+            if (completionBlock) {
+                dispatch_async(callbackQueue, ^{
+                    completionBlock(success, error);
+                });
+            }
+            return;
+        }
+        unsigned long long totalBytesExpectedToRead = [[inputFileAttributes objectForKey:NSFileSize] unsignedLongLongValue];
+        unsigned long long totalBytesRead = 0;
         
         // You can override the detected input format
         AVInputFormat *inputFormat = NULL;
@@ -132,11 +144,17 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
             frameReadValue = av_read_frame(inputFormatContext, &packet);
             if (frameReadValue != 0) {
                 continueReading = NO;
+                av_free_packet(&packet);
+                break;
             }
+            
+            //NSLog(@"packet info @ %lld: [%d] %d", packet.pos, packet.stream_index, packet.size);
+            
+            totalBytesRead += packet.size;
             
             if (progressBlock) {
                 dispatch_async(callbackQueue, ^{
-                    progressBlock(packet.pos / 1.0);
+                    progressBlock(packet.size, totalBytesRead, totalBytesExpectedToRead);
                 });
             }
             av_free_packet(&packet);
