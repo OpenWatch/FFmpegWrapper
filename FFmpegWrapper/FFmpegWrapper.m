@@ -24,6 +24,8 @@
 
 #import "FFmpegWrapper.h"
 #import "avformat.h"
+#import "avcodec.h"
+#import "intreadwrite.h"
 
 NSString const *kFFmpegInputFormatKey = @"kFFmpegInputFormatKey";
 NSString const *kFFmpegOutputFormatKey = @"kFFmpegOutputFormatKey";
@@ -44,6 +46,7 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
         self.callbackQueue = dispatch_get_main_queue();
         av_register_all();
         avformat_network_init();
+        avcodec_register_all();
     }
     return self;
 }
@@ -136,6 +139,128 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
             return;
         }
         
+        // Set the output streams to be the same as input streams
+        int copy_tb = -1;
+        for (int i = 0; i < inputFormatContext->nb_streams; i++) {
+            AVStream *inputStream = inputFormatContext->streams[i];
+            AVCodecContext *inputCodecContext = inputStream->codec;
+            AVCodec *outputCodec = avcodec_find_encoder(inputCodecContext->codec_id);
+            AVStream *outputStream = avformat_new_stream(outputFormatContext, outputCodec);
+            AVCodecContext *outputCodecContext = outputStream->codec;
+            
+            if (inputStream) {
+                outputStream->disposition          = inputStream->disposition;
+                outputCodecContext->bits_per_raw_sample    = inputCodecContext->bits_per_raw_sample;
+                outputCodecContext->chroma_sample_location = inputCodecContext->chroma_sample_location;
+            }
+            
+            AVRational sar;
+            uint64_t extra_size;
+            
+            extra_size = (uint64_t)inputCodecContext->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
+            
+            if (extra_size > INT_MAX) {
+                //return AVERROR(EINVAL);
+                return;
+            }
+            
+            // if stream_copy is selected, no need to decode or encode
+            outputCodecContext->codec_id   = inputCodecContext->codec_id;
+            outputCodecContext->codec_type = inputCodecContext->codec_type;
+            
+            if (!outputCodecContext->codec_tag) {
+                unsigned int codec_tag;
+                if (!outputFormatContext->oformat->codec_tag ||
+                    av_codec_get_id (outputFormatContext->oformat->codec_tag, inputCodecContext->codec_tag) == outputCodecContext->codec_id ||
+                    !av_codec_get_tag2(outputFormatContext->oformat->codec_tag, inputCodecContext->codec_id, &codec_tag))
+                    outputCodecContext->codec_tag = inputCodecContext->codec_tag;
+            }
+            
+            outputCodecContext->bit_rate       = inputCodecContext->bit_rate;
+            outputCodecContext->rc_max_rate    = inputCodecContext->rc_max_rate;
+            outputCodecContext->rc_buffer_size = inputCodecContext->rc_buffer_size;
+            outputCodecContext->field_order    = inputCodecContext->field_order;
+            outputCodecContext->extradata      = av_mallocz(extra_size);
+            if (!outputCodecContext->extradata) {
+                // return AVERROR(ENOMEM);
+                return;
+            }
+            memcpy(outputCodecContext->extradata, inputCodecContext->extradata, inputCodecContext->extradata_size);
+            outputCodecContext->extradata_size= inputCodecContext->extradata_size;
+            outputCodecContext->bits_per_coded_sample  = inputCodecContext->bits_per_coded_sample;
+            
+            outputCodecContext->time_base = inputStream->time_base;
+            
+            
+            if(!(outputFormatContext->oformat->flags & AVFMT_VARIABLE_FPS)
+                      && strcmp(outputFormatContext->oformat->name, "mov") && strcmp(outputFormatContext->oformat->name, "mp4") && strcmp(outputFormatContext->oformat->name, "3gp")
+                      && strcmp(outputFormatContext->oformat->name, "3g2") && strcmp(outputFormatContext->oformat->name, "psp") && strcmp(outputFormatContext->oformat->name, "ipod")
+                      && strcmp(outputFormatContext->oformat->name, "f4v")
+                      ) {
+                if(   copy_tb<0 && inputCodecContext->time_base.den
+                   && av_q2d(inputCodecContext->time_base)*inputCodecContext->ticks_per_frame > av_q2d(inputStream->time_base)
+                   && av_q2d(inputStream->time_base) < 1.0/500
+                   || copy_tb==0){
+                    outputCodecContext->time_base = inputCodecContext->time_base;
+                    outputCodecContext->time_base.num *= inputCodecContext->ticks_per_frame;
+                }
+            }
+            if (   outputCodecContext->codec_tag == AV_RL32("tmcd")
+                && inputCodecContext->time_base.num < inputCodecContext->time_base.den
+                && inputCodecContext->time_base.num > 0
+                && 121LL*inputCodecContext->time_base.num > inputCodecContext->time_base.den) {
+                outputCodecContext->time_base = inputCodecContext->time_base;
+            }
+            
+            av_reduce(&outputCodecContext->time_base.num, &outputCodecContext->time_base.den,
+                      outputCodecContext->time_base.num, outputCodecContext->time_base.den, INT_MAX);
+            
+            switch (outputCodecContext->codec_type) {
+                case AVMEDIA_TYPE_AUDIO:
+                    outputCodecContext->channel_layout     = inputCodecContext->channel_layout;
+                    outputCodecContext->sample_rate        = inputCodecContext->sample_rate;
+                    outputCodecContext->channels           = inputCodecContext->channels;
+                    outputCodecContext->frame_size         = inputCodecContext->frame_size;
+                    outputCodecContext->audio_service_type = inputCodecContext->audio_service_type;
+                    outputCodecContext->block_align        = inputCodecContext->block_align;
+                    if((outputCodecContext->block_align == 1 || outputCodecContext->block_align == 1152 || outputCodecContext->block_align == 576) && outputCodecContext->codec_id == AV_CODEC_ID_MP3)
+                        outputCodecContext->block_align= 0;
+                    if(outputCodecContext->codec_id == AV_CODEC_ID_AC3)
+                        outputCodecContext->block_align= 0;
+                    break;
+                case AVMEDIA_TYPE_VIDEO:
+                    outputCodecContext->pix_fmt            = inputCodecContext->pix_fmt;
+                    outputCodecContext->width              = inputCodecContext->width;
+                    outputCodecContext->height             = inputCodecContext->height;
+                    outputCodecContext->has_b_frames       = inputCodecContext->has_b_frames;
+                    sar = inputCodecContext->sample_aspect_ratio;
+                    break;
+                case AVMEDIA_TYPE_SUBTITLE:
+                    outputCodecContext->width  = inputCodecContext->width;
+                    outputCodecContext->height = inputCodecContext->height;
+                    break;
+                case AVMEDIA_TYPE_DATA:
+                case AVMEDIA_TYPE_ATTACHMENT:
+                    break;
+                default:
+                    abort();
+            }
+            /* Some formats want stream headers to be separate. */
+            if (outputFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
+                outputCodecContext->flags |= CODEC_FLAG_GLOBAL_HEADER;
+        }
+        
+        // Write header for output file
+        int writeHeaderValue = avformat_write_header(outputFormatContext, NULL);
+        if (writeHeaderValue < 0) {
+            avformat_close_input(&inputFormatContext);
+            avformat_free_context(outputFormatContext);
+            [[self class] handleBadReturnValue:writeHeaderValue completionBlock:completionBlock queue:callbackQueue];
+            return;
+        }
+        
+        
+        
         // Read the input file
         BOOL continueReading = YES;
         AVPacket packet;
@@ -148,9 +273,15 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
                 break;
             }
             
-            //NSLog(@"packet info @ %lld: [%d] %d", packet.pos, packet.stream_index, packet.size);
-            
             totalBytesRead += packet.size;
+            
+            int writeFrameValue = av_interleaved_write_frame(outputFormatContext, &packet);
+            if (writeFrameValue < 0) {
+                avformat_close_input(&inputFormatContext);
+                avformat_free_context(outputFormatContext);
+                [[self class] handleBadReturnValue:writeFrameValue completionBlock:completionBlock queue:callbackQueue];
+                return;
+            }
             
             if (progressBlock) {
                 dispatch_async(callbackQueue, ^{
@@ -165,7 +296,13 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
             [[self class] handleBadReturnValue:frameReadValue completionBlock:completionBlock queue:callbackQueue];
             return;
         }
-        
+        int writeTrailerValue = av_write_trailer(outputFormatContext);
+        if (writeTrailerValue < 0) {
+            avformat_close_input(&inputFormatContext);
+            avformat_free_context(outputFormatContext);
+            [[self class] handleBadReturnValue:writeTrailerValue completionBlock:completionBlock queue:callbackQueue];
+            return;
+        }
         
         // Yay looks good!
         avformat_close_input(&inputFormatContext);
