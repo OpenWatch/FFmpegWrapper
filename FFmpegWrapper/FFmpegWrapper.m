@@ -23,9 +23,9 @@
 //
 
 #import "FFmpegWrapper.h"
-#import "avformat.h"
-#import "avcodec.h"
-#import "intreadwrite.h"
+#import "libavformat/avformat.h"
+#import "libavcodec/avcodec.h"
+#import "libavutil/intreadwrite.h"
 
 NSString const *kFFmpegInputFormatKey = @"kFFmpegInputFormatKey";
 NSString const *kFFmpegOutputFormatKey = @"kFFmpegOutputFormatKey";
@@ -250,15 +250,29 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
                 outputCodecContext->flags |= CODEC_FLAG_GLOBAL_HEADER;
         }
         
+        /* open the output file, if needed */
+        if (!(outputFormatContext->oformat->flags & AVFMT_NOFILE)) {
+            int returnValue = avio_open(&outputFormatContext->pb, [outputPath UTF8String], AVIO_FLAG_WRITE);
+            if (returnValue < 0) {
+                avformat_close_input(&inputFormatContext);
+                avformat_free_context(outputFormatContext);
+                [[self class] handleBadReturnValue:returnValue completionBlock:completionBlock queue:callbackQueue];
+                return;
+            }
+        }
+        
+        AVDictionary *options = NULL;
+        
         // Write header for output file
-        int writeHeaderValue = avformat_write_header(outputFormatContext, NULL);
+        int writeHeaderValue = avformat_write_header(outputFormatContext, &options);
         if (writeHeaderValue < 0) {
+            av_dict_free(&options);
             avformat_close_input(&inputFormatContext);
             avformat_free_context(outputFormatContext);
             [[self class] handleBadReturnValue:writeHeaderValue completionBlock:completionBlock queue:callbackQueue];
             return;
         }
-        
+        av_dict_free(&options);
         
         
         // Read the input file
