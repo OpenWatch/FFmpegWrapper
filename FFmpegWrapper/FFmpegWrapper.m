@@ -41,7 +41,7 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
 #define VSYNC_DROP        0xff
 
 @interface FFStream : NSObject
-@property (nonatomic) AVRational frameRate;
+//@property (nonatomic) AVRational frameRate;
 @property (nonatomic) AVStream *stream;
 - (id) initWithStream:(AVStream*)newStream;
 @end
@@ -140,16 +140,15 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
     return [NSError errorWithDomain:kFFmpegErrorDomain code:errorCode userInfo:userInfo];
 }
 
-- (void) copyInputStream:(FFInputStream*)inputStream outputStream:(FFOutputStream*)outputStream packet:(AVPacket*)packet outputFormatContext:(AVFormatContext*)outputFormatContext
+- (AVPacket) copyInputStream:(FFInputStream*)inputStream outputStream:(FFOutputStream*)outputStream packet:(AVPacket*)packet outputFormatContext:(AVFormatContext*)outputFormatContext
 {
-    int64_t ost_tb_start_time = av_rescale_q(0, AV_TIME_BASE_Q, outputStream.stream->time_base);
     AVPicture picture;
     AVPacket outputPacket;
     
     av_init_packet(&outputPacket);
     
     if (packet->pts != AV_NOPTS_VALUE)
-        outputPacket.pts = av_rescale_q(packet->pts, inputStream.stream->time_base, outputStream.stream->time_base) - ost_tb_start_time;
+        outputPacket.pts = av_rescale_q(packet->pts, inputStream.stream->time_base, outputStream.stream->time_base);
     else
         outputPacket.pts = AV_NOPTS_VALUE;
     
@@ -157,7 +156,6 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
         outputPacket.dts = av_rescale_q(inputStream.DTS, AV_TIME_BASE_Q, outputStream.stream->time_base);
     else
         outputPacket.dts = av_rescale_q(packet->dts, inputStream.stream->time_base, outputStream.stream->time_base);
-    outputPacket.dts -= ost_tb_start_time;
     
     if (outputStream.stream->codec->codec_type == AVMEDIA_TYPE_AUDIO && packet->dts != AV_NOPTS_VALUE) {
         int duration = av_get_audio_frame_duration(inputStream.stream->codec, packet->size);
@@ -166,7 +164,7 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
         int64_t filter_in_rescale_delta_last;
         outputPacket.dts = outputPacket.pts = av_rescale_delta(inputStream.stream->time_base, packet->dts,
                                                (AVRational){1, inputStream.stream->codec->sample_rate}, duration, &filter_in_rescale_delta_last,
-                                               outputStream.stream->time_base) - ost_tb_start_time;
+                                               outputStream.stream->time_base);
         inputStream.filterInRescaleDeltaLast = filter_in_rescale_delta_last;
     }
     
@@ -198,12 +196,12 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
         outputPacket.flags |= AV_PKT_FLAG_KEY;
     }
     
-    //write_frame(of->ctx, &outputPacket, ost);
+    return outputPacket;
 }
 
 
 /* pkt = NULL means EOF (needed to flush decoder buffers) */
-- (int) processInputStream:(FFInputStream*)inputStream outputStream:(FFOutputStream*)outputStream packet:(AVPacket*)packet outputFormatContext:(AVFormatContext*)outputFormatContext
+- (AVPacket) processInputStream:(FFInputStream*)inputStream outputStream:(FFOutputStream*)outputStream packet:(AVPacket*)packet outputFormatContext:(AVFormatContext*)outputFormatContext
 {
     AVPacket avpkt;
     if (!inputStream.sawFirstTS) {
@@ -244,19 +242,7 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
             inputStream.stream->codec->sample_rate;
             break;
         case AVMEDIA_TYPE_VIDEO:
-            if (inputStream.frameRate.num) {
-                // TODO: Remove work-around for c99-to-c89 issue 7
-                AVRational time_base_q = AV_TIME_BASE_Q;
-                int64_t next_dts = av_rescale_q(inputStream.nextDTS, time_base_q, av_inv_q(inputStream.frameRate));
-                inputStream.nextDTS = av_rescale_q(next_dts + 1, av_inv_q(inputStream.frameRate), time_base_q);
-            } else if (packet->duration) {
-                inputStream.nextDTS += av_rescale_q(packet->duration, inputStream.stream->time_base, AV_TIME_BASE_Q);
-            } else if(inputStream.stream->codec->time_base.num != 0) {
-                int ticks= inputStream.stream->parser ? inputStream.stream->parser->repeat_pict + 1 : inputStream.stream->codec->ticks_per_frame;
-                inputStream.nextDTS += ((int64_t)AV_TIME_BASE *
-                                  inputStream.stream->codec->time_base.num * ticks) /
-                inputStream.stream->codec->time_base.den;
-            }
+            inputStream.nextDTS += av_rescale_q(packet->duration, inputStream.stream->time_base, AV_TIME_BASE_Q);
             break;
         default:
             break;
@@ -264,9 +250,7 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
     inputStream.PTS = inputStream.DTS;
     inputStream.nextPTS = inputStream.nextDTS;
     
-    [self copyInputStream:inputStream outputStream:outputStream packet:packet outputFormatContext:outputFormatContext];
-    
-    return 0;
+    return [self copyInputStream:inputStream outputStream:outputStream packet:packet outputFormatContext:outputFormatContext];
 }
 
 - (NSError*) errorForAVErrorNumber:(int)errorNumber {
@@ -283,7 +267,7 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
     }
 }
 
-- (AVFormatContext*) openInputPath:(NSString*)inputPath options:(NSDictionary*)options completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
+- (AVFormatContext*) formatContextForInputPath:(NSString*)inputPath options:(NSDictionary*)options completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
     // You can override the detected input format
     AVFormatContext *inputFormatContext = NULL;
     AVInputFormat *inputFormat = NULL;
@@ -315,12 +299,157 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
     return inputFormatContext;
 }
 
+- (AVFormatContext*) formatContextForOutputPath:(NSString*)outputPath options:(NSDictionary*)options completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
+    AVFormatContext *outputFormatContext = NULL;
+    NSString *outputFormatString = [options objectForKey:kFFmpegOutputFormatKey];
+    
+    int openOutputValue = avformat_alloc_output_context2(&outputFormatContext, NULL, [outputFormatString UTF8String], [outputPath UTF8String]);
+    if (openOutputValue < 0) {
+        avformat_free_context(outputFormatContext);
+        [self handleBadReturnValue:openOutputValue completionBlock:completionBlock];
+        return nil;
+    }
+    return outputFormatContext;
+}
+
+- (void) setupDirectStreamCopyFromInputFormatContext:(AVFormatContext*)inputFormatContext outputFormatContext:(AVFormatContext*)outputFormatContext inputStreams:(NSMutableArray*)inputStreams outputStreams:(NSMutableArray*)outputStreams {
+    // Set the output streams to be the same as input streams
+    NSUInteger inputStreamCount = inputFormatContext->nb_streams;
+    for (int i = 0; i < inputStreamCount; i++) {
+        AVStream *inputStream = inputFormatContext->streams[i];
+        FFInputStream *ffInputStream = [[FFInputStream alloc] initWithStream:inputStream];
+        [inputStreams addObject:ffInputStream];
+        AVCodecContext *inputCodecContext = inputStream->codec;
+        AVCodec *outputCodec = avcodec_find_encoder(inputCodecContext->codec_id);
+        AVStream *outputStream = avformat_new_stream(outputFormatContext, outputCodec);
+        FFOutputStream *ffOutputStream = [[FFOutputStream alloc] initWithStream:outputStream];
+        [outputStreams addObject:ffOutputStream];
+        
+        AVCodecContext *outputCodecContext = outputStream->codec;
+        avcodec_copy_context(outputCodecContext, inputCodecContext);
+    }
+}
+
+// Returns YES if successful
+- (BOOL) openOutputPath:(NSString*)outputPath outputFormatContext:(AVFormatContext*)outputFormatContext completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
+    
+    /* open the output file, if needed */
+    if (!(outputFormatContext->oformat->flags & AVFMT_NOFILE)) {
+        int returnValue = avio_open(&outputFormatContext->pb, [outputPath UTF8String], AVIO_FLAG_WRITE);
+        if (returnValue < 0) {
+            [self handleBadReturnValue:returnValue completionBlock:completionBlock];
+            return NO;
+        }
+    }
+    
+    AVDictionary *options = NULL;
+    
+    // Write header for output file
+    int writeHeaderValue = avformat_write_header(outputFormatContext, &options);
+    if (writeHeaderValue < 0) {
+        av_dict_free(&options);
+        [self handleBadReturnValue:writeHeaderValue completionBlock:completionBlock];
+        return NO;
+    }
+    av_dict_free(&options);
+    return YES;
+}
+
+- (BOOL) writePacket:(AVPacket*)packet outputStream:(FFOutputStream*)ffOutputStream bitstreamFilterContext:(AVBitStreamFilterContext*)bitstreamFilterContext outputFormatContext:(AVFormatContext*)outputFormatContext {
+    int video_sync_method = VSYNC_PASSTHROUGH;
+    int audio_sync_method = 0;
+    
+    AVStream *outputStream = ffOutputStream.stream;
+    
+    
+    AVCodecContext *outputCodecContext = outputStream->codec;
+    
+    if ((outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO && video_sync_method == VSYNC_DROP) ||
+        (outputCodecContext->codec_type == AVMEDIA_TYPE_AUDIO && audio_sync_method < 0))
+        packet->pts = packet->dts = AV_NOPTS_VALUE;
+    
+    if (outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO) {
+        AVPacket newPacket = *packet;
+        int a = av_bitstream_filter_filter(bitstreamFilterContext, outputCodecContext, NULL,
+                                           &newPacket.data, &newPacket.size,
+                                           packet->data, packet->size,
+                                           packet->flags & AV_PKT_FLAG_KEY);
+        if(a == 0 && newPacket.data != packet->data && newPacket.destruct) {
+            uint8_t *t = av_malloc(newPacket.size + FF_INPUT_BUFFER_PADDING_SIZE); //the new should be a subset of the old so cannot overflow
+            if(t) {
+                memcpy(t, newPacket.data, newPacket.size);
+                memset(t + newPacket.size, 0, FF_INPUT_BUFFER_PADDING_SIZE);
+                newPacket.data = t;
+                newPacket.buf = NULL;
+                a = 1;
+            } else {
+                a = AVERROR(ENOMEM);
+            }
+            
+        }
+        if (a > 0) {
+            av_free_packet(packet);
+            newPacket.buf = av_buffer_create(newPacket.data, newPacket.size,
+                                             av_buffer_default_free, NULL, 0);
+            if (!newPacket.buf) {
+                NSLog(@"new packet buffer couldnt be allocated");
+            }
+            
+        } else if (a < 0) {
+            NSLog(@"FFmpeg Error: Failed to open bitstream filter %s for stream %d with codec %s", bitstreamFilterContext->filter->name, packet->stream_index,
+                  outputCodecContext->codec ? outputCodecContext->codec->name : "copy");
+            return NO;
+        }
+        *packet = newPacket;
+    }
+    
+    if (!(outputFormatContext->oformat->flags & AVFMT_NOTIMESTAMPS) &&
+        (outputCodecContext->codec_type == AVMEDIA_TYPE_AUDIO || outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO) &&
+        packet->dts != AV_NOPTS_VALUE &&
+        ffOutputStream.lastMuxDTS != AV_NOPTS_VALUE) {
+        int64_t max = ffOutputStream.lastMuxDTS + !(outputFormatContext->oformat->flags & AVFMT_TS_NONSTRICT);
+        if (packet->dts < max) {
+            int loglevel = max - packet->dts > 2 || outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO ? AV_LOG_WARNING : AV_LOG_DEBUG;
+            av_log(outputFormatContext, loglevel, "Non-monotonous DTS in output stream "
+                   "%d:%d; previous: %"PRId64", current: %"PRId64"; ",
+                   0, outputStream->index, ffOutputStream.lastMuxDTS, packet->dts);
+            
+            av_log(outputFormatContext, loglevel, "changing to %"PRId64". This may result "
+                   "in incorrect timestamps in the output file.\n",
+                   max);
+            if(packet->pts >= packet->dts)
+                packet->pts = FFMAX(packet->pts, max);
+            packet->dts = max;
+        }
+    }
+    ffOutputStream.lastMuxDTS = packet->dts;
+    
+    // Not sure if commenting this out will have side-effects
+    //pkt->stream_index = ost->index;
+    BOOL debug_ts = TRUE;
+    if (debug_ts) {
+        NSLog(@"muxer <- type:%s "
+                   "pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s size:%d\n",
+                   av_get_media_type_string(outputStream->codec->codec_type),
+                   av_ts2str(packet->pts), av_ts2timestr(packet->pts, &outputStream->time_base),
+                   av_ts2str(packet->dts), av_ts2timestr(packet->dts, &outputStream->time_base),
+                   packet->size);
+    }
+    
+    int writeFrameValue = av_interleaved_write_frame(outputFormatContext, packet);
+    if (writeFrameValue < 0) {
+        //avformat_close_input(&inputFormatContext);
+        avformat_free_context(outputFormatContext);
+        //[self handleBadReturnValue:writeFrameValue completionBlock:completionBlock];
+        return NO;
+    }
+    outputStream->codec->frame_number++;
+    return YES;
+}
+
 - (void) convertInputPath:(NSString*)inputPath outputPath:(NSString*)outputPath options:(NSDictionary*)options progressBlock:(FFmpegWrapperProgressBlock)progressBlock completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
     dispatch_async(conversionQueue, ^{
         BOOL success = NO;
-        int video_sync_method = VSYNC_PASSTHROUGH;
-        int audio_sync_method = 0;
-        int64_t videoDTS = 0;
         NSError *error = nil;
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSDictionary *inputFileAttributes = [fileManager attributesOfItemAtPath:inputPath error:&error];
@@ -336,178 +465,30 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
         uint64_t totalBytesRead = 0;
         
         // Open the input file for reading
-        AVFormatContext *inputFormatContext = [self openInputPath:inputPath options:options completionBlock:completionBlock];
+        AVFormatContext *inputFormatContext = [self formatContextForInputPath:inputPath options:options completionBlock:completionBlock];
         if (!inputFormatContext) {
             return;
         }
         
         // Open output format context
-        AVFormatContext *outputFormatContext = NULL;
-        NSString *outputFormatString = [options objectForKey:kFFmpegOutputFormatKey];
-        
-        int openOutputValue = avformat_alloc_output_context2(&outputFormatContext, NULL, [outputFormatString UTF8String], [outputPath UTF8String]);
-        if (openOutputValue < 0) {
+        AVFormatContext *outputFormatContext = [self formatContextForOutputPath:outputPath options:options completionBlock:completionBlock];
+        if (!outputFormatContext) {
             avformat_close_input(&inputFormatContext);
-            avformat_free_context(outputFormatContext);
-            [self handleBadReturnValue:openOutputValue completionBlock:completionBlock];
             return;
         }
         
+        // Copy settings from input context to output context for direct stream copy
         NSUInteger inputStreamCount = inputFormatContext->nb_streams;
-        
-        NSMutableArray *inputStreams = [NSMutableArray arrayWithCapacity: inputStreamCount];
+        NSMutableArray *inputStreams = [NSMutableArray arrayWithCapacity:inputStreamCount];
         NSMutableArray *outputStreams = [NSMutableArray arrayWithCapacity:inputStreamCount];
+        [self setupDirectStreamCopyFromInputFormatContext:inputFormatContext outputFormatContext:outputFormatContext inputStreams:inputStreams outputStreams:outputStreams];
         
-        // Set the output streams to be the same as input streams
-        int copy_tb = -1;
-        for (int i = 0; i < inputStreamCount; i++) {
-            AVStream *inputStream = inputFormatContext->streams[i];
-            FFInputStream *ffInputStream = [[FFInputStream alloc] initWithStream:inputStream];
-            AVRational inputFrameRate = av_stream_get_r_frame_rate(inputStream);
-            ffInputStream.frameRate = inputFrameRate;
-            [inputStreams addObject:ffInputStream];
-            AVCodecContext *inputCodecContext = inputStream->codec;
-            AVCodec *outputCodec = avcodec_find_encoder(inputCodecContext->codec_id);
-            AVStream *outputStream = avformat_new_stream(outputFormatContext, outputCodec);
-            FFOutputStream *ffOutputStream = [[FFOutputStream alloc] initWithStream:outputStream];
-            [outputStreams addObject:ffOutputStream];
-
-            AVCodecContext *outputCodecContext = outputStream->codec;
-            
-            if (inputStream) {
-                outputStream->disposition          = inputStream->disposition;
-                outputCodecContext->bits_per_raw_sample    = inputCodecContext->bits_per_raw_sample;
-                outputCodecContext->chroma_sample_location = inputCodecContext->chroma_sample_location;
-            }
-            
-            AVRational sar;
-            uint64_t extra_size;
-            
-            extra_size = (uint64_t)inputCodecContext->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
-            
-            if (extra_size > INT_MAX) {
-                //return AVERROR(EINVAL);
-                return;
-            }
-            
-            // if stream_copy is selected, no need to decode or encode
-            outputCodecContext->codec_id   = inputCodecContext->codec_id;
-            outputCodecContext->codec_type = inputCodecContext->codec_type;
-            
-            if (!outputCodecContext->codec_tag) {
-                unsigned int codec_tag;
-                if (!outputFormatContext->oformat->codec_tag ||
-                    av_codec_get_id (outputFormatContext->oformat->codec_tag, inputCodecContext->codec_tag) == outputCodecContext->codec_id ||
-                    !av_codec_get_tag2(outputFormatContext->oformat->codec_tag, inputCodecContext->codec_id, &codec_tag))
-                    outputCodecContext->codec_tag = inputCodecContext->codec_tag;
-            }
-            
-            outputCodecContext->bit_rate       = inputCodecContext->bit_rate;
-            outputCodecContext->rc_max_rate    = inputCodecContext->rc_max_rate;
-            outputCodecContext->rc_buffer_size = inputCodecContext->rc_buffer_size;
-            outputCodecContext->field_order    = inputCodecContext->field_order;
-            outputCodecContext->extradata      = av_mallocz(extra_size);
-            if (!outputCodecContext->extradata) {
-                // return AVERROR(ENOMEM);
-                return;
-            }
-            memcpy(outputCodecContext->extradata, inputCodecContext->extradata, inputCodecContext->extradata_size);
-            outputCodecContext->extradata_size= inputCodecContext->extradata_size;
-            outputCodecContext->bits_per_coded_sample  = inputCodecContext->bits_per_coded_sample;
-            
-            outputCodecContext->time_base = inputStream->time_base;
-            
-            
-            if(!(outputFormatContext->oformat->flags & AVFMT_VARIABLE_FPS)
-                      && strcmp(outputFormatContext->oformat->name, "mov") && strcmp(outputFormatContext->oformat->name, "mp4") && strcmp(outputFormatContext->oformat->name, "3gp")
-                      && strcmp(outputFormatContext->oformat->name, "3g2") && strcmp(outputFormatContext->oformat->name, "psp") && strcmp(outputFormatContext->oformat->name, "ipod")
-                      && strcmp(outputFormatContext->oformat->name, "f4v")
-                      ) {
-                if(   (copy_tb<0 && inputCodecContext->time_base.den
-                   && av_q2d(inputCodecContext->time_base)*inputCodecContext->ticks_per_frame > av_q2d(inputStream->time_base)
-                   && av_q2d(inputStream->time_base) < 1.0/500)
-                   || copy_tb==0){
-                    outputCodecContext->time_base = inputCodecContext->time_base;
-                    outputCodecContext->time_base.num *= inputCodecContext->ticks_per_frame;
-                }
-            }
-            if (   outputCodecContext->codec_tag == AV_RL32("tmcd")
-                && inputCodecContext->time_base.num < inputCodecContext->time_base.den
-                && inputCodecContext->time_base.num > 0
-                && 121LL*inputCodecContext->time_base.num > inputCodecContext->time_base.den) {
-                outputCodecContext->time_base = inputCodecContext->time_base;
-            }
-            
-            if (ffInputStream && !ffOutputStream.frameRate.num)
-                ffOutputStream.frameRate = ffInputStream.frameRate;
-            if(ffOutputStream.frameRate.num)
-                outputCodecContext->time_base = av_inv_q(ffOutputStream.frameRate);
-            
-            av_reduce(&outputCodecContext->time_base.num, &outputCodecContext->time_base.den,
-                      outputCodecContext->time_base.num, outputCodecContext->time_base.den, INT_MAX);
-            
-            switch (outputCodecContext->codec_type) {
-                case AVMEDIA_TYPE_AUDIO:
-                    outputCodecContext->channel_layout     = inputCodecContext->channel_layout;
-                    outputCodecContext->sample_rate        = inputCodecContext->sample_rate;
-                    outputCodecContext->channels           = inputCodecContext->channels;
-                    outputCodecContext->frame_size         = inputCodecContext->frame_size;
-                    outputCodecContext->audio_service_type = inputCodecContext->audio_service_type;
-                    outputCodecContext->block_align        = inputCodecContext->block_align;
-                    if((outputCodecContext->block_align == 1 || outputCodecContext->block_align == 1152 || outputCodecContext->block_align == 576) && outputCodecContext->codec_id == AV_CODEC_ID_MP3)
-                        outputCodecContext->block_align= 0;
-                    if(outputCodecContext->codec_id == AV_CODEC_ID_AC3)
-                        outputCodecContext->block_align= 0;
-                    break;
-                case AVMEDIA_TYPE_VIDEO:
-                    outputCodecContext->pix_fmt            = inputCodecContext->pix_fmt;
-                    outputCodecContext->width              = inputCodecContext->width;
-                    outputCodecContext->height             = inputCodecContext->height;
-                    outputCodecContext->has_b_frames       = inputCodecContext->has_b_frames;
-                    if (inputStream->sample_aspect_ratio.num)
-                        sar = inputStream->sample_aspect_ratio;
-                    else
-                        sar = inputCodecContext->sample_aspect_ratio;
-                    outputStream->sample_aspect_ratio = inputCodecContext->sample_aspect_ratio = sar;
-                    outputStream->avg_frame_rate = inputStream->avg_frame_rate;                    break;
-                case AVMEDIA_TYPE_SUBTITLE:
-                    outputCodecContext->width  = inputCodecContext->width;
-                    outputCodecContext->height = inputCodecContext->height;
-                    break;
-                case AVMEDIA_TYPE_DATA:
-                case AVMEDIA_TYPE_ATTACHMENT:
-                    break;
-                default:
-                    abort();
-            }
-            /* Some formats want stream headers to be separate. */
-            if (outputFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
-                outputCodecContext->flags |= CODEC_FLAG_GLOBAL_HEADER;
-        }
-        
-        /* open the output file, if needed */
-        if (!(outputFormatContext->oformat->flags & AVFMT_NOFILE)) {
-            int returnValue = avio_open(&outputFormatContext->pb, [outputPath UTF8String], AVIO_FLAG_WRITE);
-            if (returnValue < 0) {
-                avformat_close_input(&inputFormatContext);
-                avformat_free_context(outputFormatContext);
-                [self handleBadReturnValue:returnValue completionBlock:completionBlock];
-                return;
-            }
-        }
-        
-        AVDictionary *options = NULL;
-        
-        // Write header for output file
-        int writeHeaderValue = avformat_write_header(outputFormatContext, &options);
-        if (writeHeaderValue < 0) {
-            av_dict_free(&options);
+        // Open the output file for writing and write header
+        if (![self openOutputPath:outputPath outputFormatContext:outputFormatContext completionBlock:completionBlock]) {
             avformat_close_input(&inputFormatContext);
             avformat_free_context(outputFormatContext);
-            [self handleBadReturnValue:writeHeaderValue completionBlock:completionBlock];
             return;
         }
-        av_dict_free(&options);
         
         AVBitStreamFilterContext *bitstreamFilterContext = av_bitstream_filter_init("h264_mp4toannexb");
         
@@ -526,111 +507,11 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
             FFOutputStream *ffOutputStream = [outputStreams objectAtIndex:packet->stream_index];
             FFInputStream *ffInputStream = [inputStreams objectAtIndex:packet->stream_index];
             
-            [self processInputStream:ffInputStream outputStream:ffOutputStream packet:packet outputFormatContext:outputFormatContext];
-            
-            AVStream *outputStream = ffOutputStream.stream;
+            AVPacket outputPacket = [self processInputStream:ffInputStream outputStream:ffOutputStream packet:packet outputFormatContext:outputFormatContext];
             
             totalBytesRead += packet->size;
             
-            AVCodecContext *outputCodecContext = outputStream->codec;
-            
-            if ((outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO && video_sync_method == VSYNC_DROP) ||
-                (outputCodecContext->codec_type == AVMEDIA_TYPE_AUDIO && audio_sync_method < 0))
-                packet->pts = packet->dts = AV_NOPTS_VALUE;
-            
-            /*
-             * Audio encoders may split the packets --  #frames in != #packets out.
-             * But there is no reordering, so we can limit the number of output packets
-             * by simply dropping them here.
-             * Counting encoded video frames needs to be done separately because of
-             * reordering, see do_video_out()
-             */
-            /*
-            if (!(avctx->codec_type == AVMEDIA_TYPE_VIDEO && avctx->codec)) {
-                if (ost->frame_number >= ost->max_frames) {
-                    av_free_packet(pkt);
-                    break;
-                }
-                ost->frame_number++;
-            }
-             */
-            if (outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO) {
-                AVPacket newPacket = *packet;
-                int a = av_bitstream_filter_filter(bitstreamFilterContext, outputCodecContext, NULL,
-                                                   &newPacket.data, &newPacket.size,
-                                                   packet->data, packet->size,
-                                                   packet->flags & AV_PKT_FLAG_KEY);
-                if(a == 0 && newPacket.data != packet->data && newPacket.destruct) {
-                    uint8_t *t = av_malloc(newPacket.size + FF_INPUT_BUFFER_PADDING_SIZE); //the new should be a subset of the old so cannot overflow
-                    if(t) {
-                        memcpy(t, newPacket.data, newPacket.size);
-                        memset(t + newPacket.size, 0, FF_INPUT_BUFFER_PADDING_SIZE);
-                        newPacket.data = t;
-                        newPacket.buf = NULL;
-                        a = 1;
-                    } else {
-                        a = AVERROR(ENOMEM);
-                    }
-                    
-                }
-                if (a > 0) {
-                    av_free_packet(packet);
-                    newPacket.buf = av_buffer_create(newPacket.data, newPacket.size,
-                                                   av_buffer_default_free, NULL, 0);
-                    if (!newPacket.buf) {
-                        NSLog(@"new packet buffer couldnt be allocated");
-                    }
-                    
-                } else if (a < 0) {
-                    NSLog(@"FFmpeg Error: Failed to open bitstream filter %s for stream %d with codec %s", bitstreamFilterContext->filter->name, packet->stream_index,
-                          outputCodecContext->codec ? outputCodecContext->codec->name : "copy");
-                    break;
-                }
-                *packet = newPacket;
-            }
-            
-            if (!(outputFormatContext->oformat->flags & AVFMT_NOTIMESTAMPS) &&
-                (outputCodecContext->codec_type == AVMEDIA_TYPE_AUDIO || outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO) &&
-                packet->dts != AV_NOPTS_VALUE &&
-                ffOutputStream.lastMuxDTS != AV_NOPTS_VALUE) {
-                int64_t max = ffOutputStream.lastMuxDTS + !(outputFormatContext->oformat->flags & AVFMT_TS_NONSTRICT);
-                if (packet->dts < max) {
-                    int loglevel = max - packet->dts > 2 || outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO ? AV_LOG_WARNING : AV_LOG_DEBUG;
-                    av_log(outputFormatContext, loglevel, "Non-monotonous DTS in output stream "
-                           "%d:%d; previous: %"PRId64", current: %"PRId64"; ",
-                           0, outputStream->index, ffOutputStream.lastMuxDTS, packet->dts);
-
-                    av_log(outputFormatContext, loglevel, "changing to %"PRId64". This may result "
-                           "in incorrect timestamps in the output file.\n",
-                           max);
-                    if(packet->pts >= packet->dts)
-                        packet->pts = FFMAX(packet->pts, max);
-                    packet->dts = max;
-                }
-            }
-            ffOutputStream.lastMuxDTS = packet->dts;
-            
-            // Not sure if commenting this out will have side-effects
-            //pkt->stream_index = ost->index;
-            BOOL debug_ts = TRUE;
-            if (debug_ts) {
-                av_log(NULL, AV_LOG_INFO, "muxer <- type:%s "
-                       "pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s size:%d\n",
-                       av_get_media_type_string(outputStream->codec->codec_type),
-                       av_ts2str(packet->pts), av_ts2timestr(packet->pts, &outputStream->time_base),
-                       av_ts2str(packet->dts), av_ts2timestr(packet->dts, &outputStream->time_base),
-                       packet->size
-                       );
-            }
-            
-            int writeFrameValue = av_interleaved_write_frame(outputFormatContext, packet);
-            if (writeFrameValue < 0) {
-                avformat_close_input(&inputFormatContext);
-                avformat_free_context(outputFormatContext);
-                [self handleBadReturnValue:writeFrameValue completionBlock:completionBlock];
-                return;
-            }
-            outputStream->codec->frame_number++;
+            [self writePacket:packet outputStream:ffOutputStream bitstreamFilterContext:bitstreamFilterContext outputFormatContext:outputFormatContext];
             
             if (progressBlock) {
                 dispatch_async(callbackQueue, ^{

@@ -41,7 +41,7 @@ typedef void(^FFmpegWrapperCompletionBlock)(BOOL success, NSError *error);
  @param totalBytesRead Total number of bytes read so far.
  @param totalBytesExpectedToRead Expected number of bytes to be read from input file.
  */
-typedef void(^FFmpegWrapperProgressBlock)(NSUInteger bytesRead, unsigned long long totalBytesRead, unsigned long long totalBytesExpectedToRead);
+typedef void(^FFmpegWrapperProgressBlock)(NSUInteger bytesRead, uint64_t totalBytesRead, uint64_t totalBytesExpectedToRead);
 
 ///-------------------------------------------------
 /// @name Options
