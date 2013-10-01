@@ -28,114 +28,17 @@
 #import "libavutil/intreadwrite.h"
 #import "libavutil/timestamp.h"
 
-
-NSString const *kFFmpegInputFormatKey = @"kFFmpegInputFormatKey";
-NSString const *kFFmpegOutputFormatKey = @"kFFmpegOutputFormatKey";
-static NSString * const kFFmpegErrorDomain = @"org.ffmpeg.FFmpeg";
-static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
+#import "FFInputFile.h"
+#import "FFOutputFile.h"
+#import "FFInputStream.h"
+#import "FFOutputStream.h"
+#import "FFBitstreamFilter.h"
 
 #define VSYNC_AUTO       -1
 #define VSYNC_PASSTHROUGH 0
 #define VSYNC_CFR         1
 #define VSYNC_VFR         2
 #define VSYNC_DROP        0xff
-
-@interface FFStream : NSObject
-//@property (nonatomic) AVRational frameRate;
-@property (nonatomic) AVStream *stream;
-- (id) initWithStream:(AVStream*)newStream;
-@end
-
-@implementation FFStream
-@synthesize stream;
-- (id) initWithStream:(AVStream *)newStream {
-    if (self = [super init]) {
-        self.stream = newStream;
-    }
-    return self;
-}
-@end
-
-@interface FFInputStream : FFStream
-/* predicted dts of the next packet read for this stream or (when there are
- * several frames in a packet) of the next frame in current packet (in AV_TIME_BASE units) */
-@property (nonatomic) int64_t       nextDTS;
-@property (nonatomic) int64_t       DTS;       ///< dts of the last packet read for this stream (in AV_TIME_BASE units)
-
-@property (nonatomic) int64_t       nextPTS;  ///< synthetic pts for the next decode frame (in AV_TIME_BASE units)
-@property (nonatomic) int64_t       PTS;       ///< current pts of the decoded frame  (in AV_TIME_BASE units)
-@property (nonatomic) int64_t filterInRescaleDeltaLast;
-
-@property (nonatomic) BOOL sawFirstTS;
-@property (nonatomic) BOOL wrapCorrectionDone;
-@property (nonatomic) double timestampScale;
-@end
-
-@implementation FFInputStream
-@synthesize nextDTS, DTS, nextPTS, PTS;
-- (id) initWithStream:(AVStream *)newStream {
-    if (self = [super initWithStream:newStream]) {
-        self.nextPTS = AV_NOPTS_VALUE;
-        self.PTS = AV_NOPTS_VALUE;
-        self.nextDTS = AV_NOPTS_VALUE;
-        self.DTS = AV_NOPTS_VALUE;
-        self.filterInRescaleDeltaLast = AV_NOPTS_VALUE;
-        self.sawFirstTS = NO;
-        self.wrapCorrectionDone = NO;
-    }
-    return self;
-}
-@end
-
-@interface FFOutputStream : FFStream
-@property (nonatomic) int64_t lastMuxDTS;
-@property (nonatomic) int frameNumber;
-@end
-
-@implementation FFOutputStream
-@synthesize lastMuxDTS, frameNumber;
-- (id) initWithStream:(AVStream *)newStream {
-    if (self = [super initWithStream:newStream]) {
-        self.lastMuxDTS = AV_NOPTS_VALUE;
-        self.frameNumber = 0;
-    }
-    return self;
-}
-@end
-
-@interface FFFile : NSObject
-@property (nonatomic) AVFormatContext *formatContext;
-@property (nonatomic) NSArray *streams;
-- (id) initWithFormatContext:(AVFormatContext*)formatContext;
-@end
-
-@implementation FFFile
-@synthesize formatContext, streams;
-- (id) initWithFormatContext:(AVFormatContext*)newFormatContext {
-    if (self = [super init]) {
-        formatContext = newFormatContext;
-    }
-    return self;
-}
-@end
-
-@interface FFInputFile : FFFile
-@property (nonatomic) BOOL endOfFileReached;
-@property (nonatomic) int64_t timestampOffset;
-@property (nonatomic) int64_t lastTimestamp;
-@end
-
-@implementation FFInputFile
-@synthesize endOfFileReached, timestampOffset, lastTimestamp;
-@end
-
-@interface FFOutputFile : FFFile
-@property (nonatomic) int64_t startTime;
-@end
-
-@implementation FFOutputFile
-@synthesize startTime;
-@end
 
 @implementation FFmpegWrapper
 @synthesize conversionQueue, callbackQueue;
@@ -155,27 +58,6 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
     return self;
 }
 
-- (NSString*) stringForAVErrorNumber:(int)errorNumber {
-    NSString *errorString = nil;
-    char *errorBuffer = malloc(sizeof(char) * AV_ERROR_MAX_STRING_SIZE);
-    
-    int value = av_strerror(errorNumber, errorBuffer, AV_ERROR_MAX_STRING_SIZE);
-    if (value != 0) {
-        return nil;
-    }
-    errorString = [NSString stringWithUTF8String:errorBuffer];
-    free(errorBuffer);
-    return errorString;
-}
-
-- (NSError*) errorWithCode:(int)errorCode localizedDescription:(NSString*)description {
-    NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithCapacity:1];
-    if (description) {
-        [userInfo setObject:description forKey:NSLocalizedDescriptionKey];
-    }
-    [userInfo setObject:@(errorCode) forKey:kFFmpegErrorCode];
-    return [NSError errorWithDomain:kFFmpegErrorDomain code:errorCode userInfo:userInfo];
-}
 
 - (AVPacket) copyInputStream:(FFInputStream*)inputStream outputStream:(FFOutputStream*)outputStream packet:(AVPacket*)packet outputFormatContext:(AVFormatContext*)outputFormatContext
 {
@@ -295,82 +177,18 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
     return [self copyInputStream:inputStream outputStream:outputStream packet:packet outputFormatContext:outputFormatContext];
 }
 
-- (NSError*) errorForAVErrorNumber:(int)errorNumber {
-    NSString *description = [self stringForAVErrorNumber:errorNumber];
-    return [self errorWithCode:errorNumber localizedDescription:description];
-}
-
-- (void) handleBadReturnValue:(int)returnValue completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
-    if (completionBlock) {
-        NSError *error = [self errorForAVErrorNumber:returnValue];
-        dispatch_async(self.callbackQueue, ^{
-            completionBlock(NO, error);
-        });
-    }
-}
-
-- (AVFormatContext*) formatContextForInputPath:(NSString*)inputPath options:(NSDictionary*)options completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
-    // You can override the detected input format
-    AVFormatContext *inputFormatContext = NULL;
-    AVInputFormat *inputFormat = NULL;
-    AVDictionary *inputOptions = NULL;
-    
-    NSString *inputFormatString = [options objectForKey:kFFmpegInputFormatKey];
-    if (inputFormatString) {
-        inputFormat = av_find_input_format([inputFormatString UTF8String]);
-    }
-    
-    // It's possible to send more options to the parser
-    // av_dict_set(&inputOptions, "video_size", "640x480", 0);
-    // av_dict_set(&inputOptions, "pixel_format", "rgb24", 0);
-    // av_dict_free(&inputOptions); // Don't forget to free
-    
-    int openInputValue = avformat_open_input(&inputFormatContext, [inputPath UTF8String], inputFormat, &inputOptions);
-    if (openInputValue != 0) {
-        avformat_close_input(&inputFormatContext);
-        [self handleBadReturnValue:openInputValue completionBlock:completionBlock];
-        return nil;
-    }
-    
-    int streamInfoValue = avformat_find_stream_info(inputFormatContext, NULL);
-    if (streamInfoValue < 0) {
-        avformat_close_input(&inputFormatContext);
-        [self handleBadReturnValue:streamInfoValue completionBlock:completionBlock];
-        return nil;
-    }
-    return inputFormatContext;
-}
-
-- (AVFormatContext*) formatContextForOutputPath:(NSString*)outputPath options:(NSDictionary*)options completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
-    AVFormatContext *outputFormatContext = NULL;
-    NSString *outputFormatString = [options objectForKey:kFFmpegOutputFormatKey];
-    
-    int openOutputValue = avformat_alloc_output_context2(&outputFormatContext, NULL, [outputFormatString UTF8String], [outputPath UTF8String]);
-    if (openOutputValue < 0) {
-        avformat_free_context(outputFormatContext);
-        [self handleBadReturnValue:openOutputValue completionBlock:completionBlock];
-        return nil;
-    }
-    return outputFormatContext;
-}
-
-- (void) setupDirectStreamCopyFromInputFormatContext:(AVFormatContext*)inputFormatContext outputFormatContext:(AVFormatContext*)outputFormatContext inputStreams:(NSMutableArray*)inputStreams outputStreams:(NSMutableArray*)outputStreams {
+- (void) setupDirectStreamCopyFromInputFile:(FFInputFile*)inputFile outputFile:(FFOutputFile*)outputFile {
     // Set the output streams to be the same as input streams
-    NSUInteger inputStreamCount = inputFormatContext->nb_streams;
+    NSUInteger inputStreamCount = inputFile.streams.count;
     for (int i = 0; i < inputStreamCount; i++) {
-        AVStream *inputStream = inputFormatContext->streams[i];
-        FFInputStream *ffInputStream = [[FFInputStream alloc] initWithStream:inputStream];
-        [inputStreams addObject:ffInputStream];
-        AVCodecContext *inputCodecContext = inputStream->codec;
-        AVCodec *outputCodec = avcodec_find_encoder(inputCodecContext->codec_id);
-        AVStream *outputStream = avformat_new_stream(outputFormatContext, outputCodec);
-        FFOutputStream *ffOutputStream = [[FFOutputStream alloc] initWithStream:outputStream];
-        [outputStreams addObject:ffOutputStream];
+        FFInputStream *inputStream = [inputFile.streams objectAtIndex:i];
+        FFOutputStream *outputStream = [[FFOutputStream alloc] initWithOutputFile:outputFile outputCodec:[inputStream codecName]];
         
-        AVCodecContext *outputCodecContext = outputStream->codec;
+        AVCodecContext *inputCodecContext = inputStream.stream->codec;
+        AVCodecContext *outputCodecContext = outputStream.stream->codec;
         
         if (inputStream) {
-            outputStream->disposition          = inputStream->disposition;
+            outputStream.stream->disposition          = inputStream.stream->disposition;
             outputCodecContext->bits_per_raw_sample    = inputCodecContext->bits_per_raw_sample;
             outputCodecContext->chroma_sample_location = inputCodecContext->chroma_sample_location;
         }
@@ -391,9 +209,9 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
         
         if (!outputCodecContext->codec_tag) {
             unsigned int codec_tag;
-            if (!outputFormatContext->oformat->codec_tag ||
-                av_codec_get_id (outputFormatContext->oformat->codec_tag, inputCodecContext->codec_tag) == outputCodecContext->codec_id ||
-                !av_codec_get_tag2(outputFormatContext->oformat->codec_tag, inputCodecContext->codec_id, &codec_tag))
+            if (!outputFile.formatContext->oformat->codec_tag ||
+                av_codec_get_id (outputFile.formatContext->oformat->codec_tag, inputCodecContext->codec_tag) == outputCodecContext->codec_id ||
+                !av_codec_get_tag2(outputFile.formatContext->oformat->codec_tag, inputCodecContext->codec_id, &codec_tag))
                 outputCodecContext->codec_tag = inputCodecContext->codec_tag;
         }
         
@@ -410,7 +228,7 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
         outputCodecContext->extradata_size= inputCodecContext->extradata_size;
         outputCodecContext->bits_per_coded_sample  = inputCodecContext->bits_per_coded_sample;
         
-        outputCodecContext->time_base = inputStream->time_base;
+        outputCodecContext->time_base = inputStream.stream->time_base;
         
         av_reduce(&outputCodecContext->time_base.num, &outputCodecContext->time_base.den,
                   outputCodecContext->time_base.num, outputCodecContext->time_base.den, INT_MAX);
@@ -433,12 +251,12 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
                 outputCodecContext->width              = inputCodecContext->width;
                 outputCodecContext->height             = inputCodecContext->height;
                 outputCodecContext->has_b_frames       = inputCodecContext->has_b_frames;
-                if (inputStream->sample_aspect_ratio.num)
-                    sar = inputStream->sample_aspect_ratio;
+                if (inputStream.stream->sample_aspect_ratio.num)
+                    sar = inputStream.stream->sample_aspect_ratio;
                 else
                     sar = inputCodecContext->sample_aspect_ratio;
-                outputStream->sample_aspect_ratio = inputCodecContext->sample_aspect_ratio = sar;
-                outputStream->avg_frame_rate = inputStream->avg_frame_rate;                    break;
+                outputStream.stream->sample_aspect_ratio = inputCodecContext->sample_aspect_ratio = sar;
+                outputStream.stream->avg_frame_rate = inputStream.stream->avg_frame_rate;                    break;
             case AVMEDIA_TYPE_SUBTITLE:
                 outputCodecContext->width  = inputCodecContext->width;
                 outputCodecContext->height = inputCodecContext->height;
@@ -450,69 +268,12 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
                 abort();
         }
         /* Some formats want stream headers to be separate. */
-        if (outputFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
+        if (outputFile.formatContext->oformat->flags & AVFMT_GLOBALHEADER)
             outputCodecContext->flags |= CODEC_FLAG_GLOBAL_HEADER;
     }
 }
 
-// Returns YES if successful
-- (BOOL) openOutputPath:(NSString*)outputPath outputFormatContext:(AVFormatContext*)outputFormatContext completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
-    
-    /* open the output file, if needed */
-    if (!(outputFormatContext->oformat->flags & AVFMT_NOFILE)) {
-        int returnValue = avio_open(&outputFormatContext->pb, [outputPath UTF8String], AVIO_FLAG_WRITE);
-        if (returnValue < 0) {
-            [self handleBadReturnValue:returnValue completionBlock:completionBlock];
-            return NO;
-        }
-    }
-    
-    AVDictionary *options = NULL;
-    
-    // Write header for output file
-    int writeHeaderValue = avformat_write_header(outputFormatContext, &options);
-    if (writeHeaderValue < 0) {
-        av_dict_free(&options);
-        [self handleBadReturnValue:writeHeaderValue completionBlock:completionBlock];
-        return NO;
-    }
-    av_dict_free(&options);
-    return YES;
-}
 
-- (AVPacket) applyBitstreamFilter:(AVBitStreamFilterContext*)bitstreamFilterContext packet:(AVPacket*)packet outputCodecContext:(AVCodecContext*)outputCodecContext {
-    AVPacket newPacket = *packet;
-    int a = av_bitstream_filter_filter(bitstreamFilterContext, outputCodecContext, NULL,
-                                       &newPacket.data, &newPacket.size,
-                                       packet->data, packet->size,
-                                       packet->flags & AV_PKT_FLAG_KEY);
-    if(a == 0 && newPacket.data != packet->data && newPacket.destruct) {
-        uint8_t *t = av_malloc(newPacket.size + FF_INPUT_BUFFER_PADDING_SIZE); //the new should be a subset of the old so cannot overflow
-        if(t) {
-            memcpy(t, newPacket.data, newPacket.size);
-            memset(t + newPacket.size, 0, FF_INPUT_BUFFER_PADDING_SIZE);
-            newPacket.data = t;
-            newPacket.buf = NULL;
-            a = 1;
-        } else {
-            a = AVERROR(ENOMEM);
-        }
-        
-    }
-    if (a > 0) {
-        av_free_packet(packet);
-        newPacket.buf = av_buffer_create(newPacket.data, newPacket.size,
-                                         av_buffer_default_free, NULL, 0);
-        if (!newPacket.buf) {
-            NSLog(@"new packet buffer couldnt be allocated");
-        }
-        
-    } else if (a < 0) {
-        NSLog(@"FFmpeg Error: Failed to open bitstream filter %s for stream %d with codec %s", bitstreamFilterContext->filter->name, packet->stream_index,
-              outputCodecContext->codec ? outputCodecContext->codec->name : "copy");
-    }
-    return newPacket;
-}
 
 - (AVPacket*) processInputPacket:(AVPacket*)packet inputFormatContext:(AVFormatContext*)inputFormatContext inputStream:(FFInputStream*)inputStream inputFile:(FFInputFile*)inputFile {
     BOOL do_pkt_dump = YES;
@@ -652,134 +413,73 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
     return packet;
 }
 
-- (BOOL) writePacket:(AVPacket*)packet outputStream:(FFOutputStream*)ffOutputStream bitstreamFilterContext:(AVBitStreamFilterContext*)bitstreamFilterContext outputFormatContext:(AVFormatContext*)outputFormatContext {
-    if (!packet) {
-        NSLog(@"NULL packet!");
-        return NO;
+- (void) finishWithSuccess:(BOOL)success error:(NSError*)error completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
+    if (completionBlock) {
+        dispatch_async(callbackQueue, ^{
+            completionBlock(success, error);
+        });
     }
-    AVStream *outputStream = ffOutputStream.stream;
-    
-    AVCodecContext *outputCodecContext = outputStream->codec;
-    
-    if (outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO) {
-        AVPacket newPacket = [self applyBitstreamFilter:bitstreamFilterContext packet:packet outputCodecContext:outputCodecContext];
-        packet = &newPacket;
-    }
-    
-    if (!(outputFormatContext->oformat->flags & AVFMT_NOTIMESTAMPS) &&
-        (outputCodecContext->codec_type == AVMEDIA_TYPE_AUDIO || outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO) &&
-        packet->dts != AV_NOPTS_VALUE &&
-        ffOutputStream.lastMuxDTS != AV_NOPTS_VALUE) {
-        int64_t max = ffOutputStream.lastMuxDTS + !(outputFormatContext->oformat->flags & AVFMT_TS_NONSTRICT);
-        if (packet->dts < max) {
-            int loglevel = max - packet->dts > 2 || outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO ? AV_LOG_WARNING : AV_LOG_DEBUG;
-            av_log(outputFormatContext, loglevel, "Non-monotonous DTS in output stream "
-                   "%d:%d; previous: %"PRId64", current: %"PRId64"; ",
-                   0, outputStream->index, ffOutputStream.lastMuxDTS, packet->dts);
-            
-            av_log(outputFormatContext, loglevel, "changing to %"PRId64". This may result "
-                   "in incorrect timestamps in the output file.\n",
-                   max);
-            if(packet->pts >= packet->dts)
-                packet->pts = FFMAX(packet->pts, max);
-            packet->dts = max;
-        }
-    }
-    ffOutputStream.lastMuxDTS = packet->dts;
-    
-    // Not sure if commenting this out will have side-effects
-    //pkt->stream_index = ost->index;
-    BOOL debug_ts = TRUE;
-    if (debug_ts) {
-        NSLog(@"muxer <- type:%s "
-                   "pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s size:%d\n",
-                   av_get_media_type_string(outputStream->codec->codec_type),
-                   av_ts2str(packet->pts), av_ts2timestr(packet->pts, &outputStream->time_base),
-                   av_ts2str(packet->dts), av_ts2timestr(packet->dts, &outputStream->time_base),
-                   packet->size);
-    }
-    
-    int writeFrameValue = av_interleaved_write_frame(outputFormatContext, packet);
-    if (writeFrameValue < 0) {
-        //avformat_close_input(&inputFormatContext);
-        avformat_free_context(outputFormatContext);
-        //[self handleBadReturnValue:writeFrameValue completionBlock:completionBlock];
-        return NO;
-    }
-    outputStream->codec->frame_number++;
-    return YES;
 }
 
 - (void) convertInputPath:(NSString*)inputPath outputPath:(NSString*)outputPath options:(NSDictionary*)options progressBlock:(FFmpegWrapperProgressBlock)progressBlock completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
     dispatch_async(conversionQueue, ^{
         FFInputFile *inputFile = nil;
         FFOutputFile *outputFile = nil;
-        BOOL success = NO;
         NSError *error = nil;
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSDictionary *inputFileAttributes = [fileManager attributesOfItemAtPath:inputPath error:&error];
         if (error) {
-            if (completionBlock) {
-                dispatch_async(callbackQueue, ^{
-                    completionBlock(success, error);
-                });
-            }
+            [self finishWithSuccess:NO error:error completionBlock:completionBlock];
             return;
         }
         uint64_t totalBytesExpectedToRead = [[inputFileAttributes objectForKey:NSFileSize] unsignedLongLongValue];
         uint64_t totalBytesRead = 0;
         
         // Open the input file for reading
-        AVFormatContext *inputFormatContext = [self formatContextForInputPath:inputPath options:options completionBlock:completionBlock];
-        if (!inputFormatContext) {
-            return;
-        }
-        inputFile = [[FFInputFile alloc] initWithFormatContext:inputFormatContext];
+        inputFile = [[FFInputFile alloc] initWithPath:inputPath options:options];
         
         // Open output format context
-        AVFormatContext *outputFormatContext = [self formatContextForOutputPath:outputPath options:options completionBlock:completionBlock];
-        if (!outputFormatContext) {
-            avformat_close_input(&inputFormatContext);
-            return;
-        }
-        outputFile = [[FFOutputFile alloc] initWithFormatContext:outputFormatContext];
+        outputFile = [[FFOutputFile alloc] initWithPath:outputPath options:options];
         
         // Copy settings from input context to output context for direct stream copy
-        NSUInteger inputStreamCount = inputFormatContext->nb_streams;
-        NSMutableArray *inputStreams = [NSMutableArray arrayWithCapacity:inputStreamCount];
-        NSMutableArray *outputStreams = [NSMutableArray arrayWithCapacity:inputStreamCount];
-        [self setupDirectStreamCopyFromInputFormatContext:inputFormatContext outputFormatContext:outputFormatContext inputStreams:inputStreams outputStreams:outputStreams];
+
+        [self setupDirectStreamCopyFromInputFile:inputFile outputFile:outputFile];
         
         // Open the output file for writing and write header
-        if (![self openOutputPath:outputPath outputFormatContext:outputFormatContext completionBlock:completionBlock]) {
-            avformat_close_input(&inputFormatContext);
-            avformat_free_context(outputFormatContext);
+        if (![outputFile openFileForWritingWithError:&error]) {
+            [self finishWithSuccess:NO error:error completionBlock:completionBlock];
+            return;
+        }
+        if (![outputFile writeHeaderWithError:&error]) {
+            [self finishWithSuccess:NO error:error completionBlock:completionBlock];
             return;
         }
         
-        AVBitStreamFilterContext *bitstreamFilterContext = av_bitstream_filter_init("h264_mp4toannexb");
+        FFBitstreamFilter *bitstreamFilter = [[FFBitstreamFilter alloc] initWithFilterName:@"h264_mp4toannexb"];
+        [outputFile addBitstreamFilter:bitstreamFilter];
         
         // Read the input file
         BOOL continueReading = YES;
         AVPacket *packet = av_malloc(sizeof(AVPacket));
-        int frameReadValue = -1;
         while (continueReading) {
-            frameReadValue = av_read_frame(inputFormatContext, packet);
-            if (frameReadValue != 0) {
-                continueReading = NO;
-                av_free_packet(packet);
+            continueReading = [inputFile readFrameIntoPacket:packet error:&error];
+            if (error) {
+                [self finishWithSuccess:NO error:error completionBlock:completionBlock];
+                return;
+            }
+            if (!continueReading) {
                 break;
             }
-            
-            FFOutputStream *ffOutputStream = [outputStreams objectAtIndex:packet->stream_index];
-            FFInputStream *ffInputStream = [inputStreams objectAtIndex:packet->stream_index];
             
             //AVPacket *processedPacket = [self processInputPacket:packet inputFormatContext:inputFormatContext inputStream:ffInputStream inputFile:inputFile];
             //AVPacket outputPacket = [self processInputStream:ffInputStream outputStream:ffOutputStream packet:processedPacket outputFormatContext:outputFormatContext];
             
             totalBytesRead += packet->size;
             
-            [self writePacket:packet outputStream:ffOutputStream bitstreamFilterContext:bitstreamFilterContext outputFormatContext:outputFormatContext];
+            if (![outputFile writePacket:packet error:&error]) {
+                [self finishWithSuccess:NO error:error completionBlock:completionBlock];
+                return;
+            }
             
             if (progressBlock) {
                 dispatch_async(callbackQueue, ^{
@@ -788,30 +488,14 @@ static NSString * const kFFmpegErrorCode = @"kFFmpegErrorCode";
             }
             av_free_packet(packet);
         }
-        if (frameReadValue < 0 && frameReadValue != AVERROR_EOF) {
-            avformat_close_input(&inputFormatContext);
-            avformat_free_context(outputFormatContext);
-            [self handleBadReturnValue:frameReadValue completionBlock:completionBlock];
-            return;
-        }
-        int writeTrailerValue = av_write_trailer(outputFormatContext);
-        if (writeTrailerValue < 0) {
-            avformat_close_input(&inputFormatContext);
-            avformat_free_context(outputFormatContext);
-            [self handleBadReturnValue:writeTrailerValue completionBlock:completionBlock];
+
+        if (![outputFile writeTrailerWithError:&error]) {
+            [self finishWithSuccess:NO error:error completionBlock:completionBlock];
             return;
         }
         
         // Yay looks good!
-        avformat_close_input(&inputFormatContext);
-        avformat_free_context(outputFormatContext);
-        success = YES;
-        error = nil;
-        if (completionBlock) {
-            dispatch_async(callbackQueue, ^{
-                completionBlock(success, error);
-            });
-        }
+        [self finishWithSuccess:YES error:nil completionBlock:completionBlock];
     });
 }
 
