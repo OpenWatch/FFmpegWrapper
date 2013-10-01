@@ -8,6 +8,7 @@
 
 #import "FFStream.h"
 
+
 @implementation FFStream
 @synthesize stream, parentFile;
 - (id) initWithFile:(FFFile *)newParentFile {

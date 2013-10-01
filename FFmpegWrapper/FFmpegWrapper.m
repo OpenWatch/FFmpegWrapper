@@ -58,212 +58,17 @@
     return self;
 }
 
-
-- (AVPacket*) copyInputStream:(FFInputStream*)inputStream outputStream:(FFOutputStream*)outputStream packet:(AVPacket*)packet
-{
-    AVFormatContext *outputFormatContext = outputStream.parentFile.formatContext;
-    AVPicture picture;
-    AVPacket *outputPacket = av_malloc(sizeof(AVPacket));
-    av_init_packet(outputPacket);
-    
-    //if (!outputStream.frameNumber && !(packet->flags & AV_PKT_FLAG_KEY))
-    //    return nil;
-    
-    if (packet->pts != AV_NOPTS_VALUE)
-        outputPacket->pts = av_rescale_q(packet->pts, inputStream.stream->time_base, outputStream.stream->time_base);
-    else
-        outputPacket->pts = AV_NOPTS_VALUE;
-    
-    if (packet->dts == AV_NOPTS_VALUE)
-        outputPacket->dts = av_rescale_q(inputStream.DTS, AV_TIME_BASE_Q, outputStream.stream->time_base);
-    else
-        outputPacket->dts = av_rescale_q(packet->dts, inputStream.stream->time_base, outputStream.stream->time_base);
-    
-    if (outputStream.stream->codec->codec_type == AVMEDIA_TYPE_AUDIO && packet->dts != AV_NOPTS_VALUE) {
-        int duration = av_get_audio_frame_duration(inputStream.stream->codec, packet->size);
-        if(!duration)
-            duration = inputStream.stream->codec->frame_size;
-        int64_t filter_in_rescale_delta_last;
-        outputPacket->dts = outputPacket->pts = av_rescale_delta(inputStream.stream->time_base, packet->dts,
-                                               (AVRational){1, inputStream.stream->codec->sample_rate}, duration, &filter_in_rescale_delta_last,
-                                               outputStream.stream->time_base);
-        inputStream.filterInRescaleDeltaLast = filter_in_rescale_delta_last;
-    }
-    
-    outputPacket->duration = av_rescale_q(packet->duration, inputStream.stream->time_base, outputStream.stream->time_base);
-    outputPacket->flags    = packet->flags;
-    
-    // FIXME remove the following 2 lines they shall be replaced by the bitstream filters
-    if (  outputStream.stream->codec->codec_id != AV_CODEC_ID_H264
-        && outputStream.stream->codec->codec_id != AV_CODEC_ID_MPEG1VIDEO
-        && outputStream.stream->codec->codec_id != AV_CODEC_ID_MPEG2VIDEO
-        && outputStream.stream->codec->codec_id != AV_CODEC_ID_VC1
-        ) {
-        if (av_parser_change(inputStream.stream->parser, outputStream.stream->codec, &outputPacket->data, &outputPacket->size, packet->data, packet->size, packet->flags & AV_PKT_FLAG_KEY)) {
-            outputPacket->buf = av_buffer_create(outputPacket->data, outputPacket->size, av_buffer_default_free, NULL, 0);
-            if (!outputPacket->buf) {
-                NSLog(@"couldnt allocate packet buffer");
-            }
-        }
-    } else {
-        outputPacket->data = packet->data;
-        outputPacket->size = packet->size;
-    }
-    
-    if (outputStream.stream->codec->codec_type == AVMEDIA_TYPE_VIDEO && (outputFormatContext->oformat->flags & AVFMT_RAWPICTURE)) {
-        /* store AVPicture in AVPacket, as expected by the output format */
-        avpicture_fill(&picture, outputPacket->data, outputStream.stream->codec->pix_fmt, outputStream.stream->codec->width, outputStream.stream->codec->height);
-        outputPacket->data = (uint8_t *)&picture;
-        outputPacket->size = sizeof(AVPicture);
-        outputPacket->flags |= AV_PKT_FLAG_KEY;
-    }
-    
-    return outputPacket;
-}
-
-
-/* pkt = NULL means EOF (needed to flush decoder buffers) */
-- (AVPacket*) processInputStream:(FFInputStream*)inputStream outputStream:(FFOutputStream*)outputStream packet:(AVPacket*)packet
-{
-    if (!inputStream.sawFirstTS) {
-        inputStream.DTS = inputStream.stream->avg_frame_rate.num ? - inputStream.stream->codec->has_b_frames * AV_TIME_BASE / av_q2d(inputStream.stream->avg_frame_rate) : 0;
-        inputStream.PTS = 0;
-        if (packet != NULL && packet->pts != AV_NOPTS_VALUE) {
-            inputStream.DTS += av_rescale_q(packet->pts, inputStream.stream->time_base, AV_TIME_BASE_Q);
-            inputStream.PTS = inputStream.DTS; //unused but better to set it to a value thats not totally wrong
-        }
-        inputStream.sawFirstTS = YES;
-    }
-    
-    if (inputStream.nextDTS == AV_NOPTS_VALUE)
-        inputStream.nextDTS = inputStream.DTS;
-    if (inputStream.nextPTS == AV_NOPTS_VALUE)
-        inputStream.nextPTS = inputStream.PTS;
-    
-    if (packet->dts != AV_NOPTS_VALUE) {
-        inputStream.nextDTS = inputStream.DTS = av_rescale_q(packet->dts, inputStream.stream->time_base, AV_TIME_BASE_Q);
-        inputStream.nextPTS = inputStream.PTS = inputStream.DTS;
-    }
-    
-    /* handle stream copy */
-    inputStream.DTS = inputStream.nextDTS;
-    switch (inputStream.stream->codec->codec_type) {
-        case AVMEDIA_TYPE_AUDIO:
-            inputStream.nextDTS += ((int64_t)AV_TIME_BASE * inputStream.stream->codec->frame_size) /
-            inputStream.stream->codec->sample_rate;
-            break;
-        case AVMEDIA_TYPE_VIDEO:
-            if (packet->duration) {
-                inputStream.nextDTS += av_rescale_q(packet->duration, inputStream.stream->time_base, AV_TIME_BASE_Q);
-            }
-            break;
-        default:
-            break;
-    }
-    inputStream.PTS = inputStream.DTS;
-    inputStream.nextPTS = inputStream.nextDTS;
-    
-    return [self copyInputStream:inputStream outputStream:outputStream packet:packet];
-}
-
 - (void) setupDirectStreamCopyFromInputFile:(FFInputFile*)inputFile outputFile:(FFOutputFile*)outputFile {
     // Set the output streams to be the same as input streams
     NSUInteger inputStreamCount = inputFile.streams.count;
     for (int i = 0; i < inputStreamCount; i++) {
         FFInputStream *inputStream = [inputFile.streams objectAtIndex:i];
         FFOutputStream *outputStream = [[FFOutputStream alloc] initWithOutputFile:outputFile outputCodec:[inputStream codecName]];
-        
         AVCodecContext *inputCodecContext = inputStream.stream->codec;
         AVCodecContext *outputCodecContext = outputStream.stream->codec;
-        
-        if (inputStream) {
-            outputStream.stream->disposition          = inputStream.stream->disposition;
-            outputCodecContext->bits_per_raw_sample    = inputCodecContext->bits_per_raw_sample;
-            outputCodecContext->chroma_sample_location = inputCodecContext->chroma_sample_location;
-        }
-        
-        AVRational sar;
-        uint64_t extra_size;
-        
-        extra_size = (uint64_t)inputCodecContext->extradata_size + FF_INPUT_BUFFER_PADDING_SIZE;
-        
-        if (extra_size > INT_MAX) {
-            //return AVERROR(EINVAL);
-            return;
-        }
-        
-        // if stream_copy is selected, no need to decode or encode
-        outputCodecContext->codec_id   = inputCodecContext->codec_id;
-        outputCodecContext->codec_type = inputCodecContext->codec_type;
-        
-        if (!outputCodecContext->codec_tag) {
-            unsigned int codec_tag;
-            if (!outputFile.formatContext->oformat->codec_tag ||
-                av_codec_get_id (outputFile.formatContext->oformat->codec_tag, inputCodecContext->codec_tag) == outputCodecContext->codec_id ||
-                !av_codec_get_tag2(outputFile.formatContext->oformat->codec_tag, inputCodecContext->codec_id, &codec_tag))
-                outputCodecContext->codec_tag = inputCodecContext->codec_tag;
-        }
-        
-        outputCodecContext->bit_rate       = inputCodecContext->bit_rate;
-        outputCodecContext->rc_max_rate    = inputCodecContext->rc_max_rate;
-        outputCodecContext->rc_buffer_size = inputCodecContext->rc_buffer_size;
-        outputCodecContext->field_order    = inputCodecContext->field_order;
-        outputCodecContext->extradata      = av_mallocz(extra_size);
-        if (!outputCodecContext->extradata) {
-            // return AVERROR(ENOMEM);
-            return;
-        }
-        memcpy(outputCodecContext->extradata, inputCodecContext->extradata, inputCodecContext->extradata_size);
-        outputCodecContext->extradata_size= inputCodecContext->extradata_size;
-        outputCodecContext->bits_per_coded_sample  = inputCodecContext->bits_per_coded_sample;
-        
-        outputCodecContext->time_base = inputStream.stream->time_base;
-        
-        av_reduce(&outputCodecContext->time_base.num, &outputCodecContext->time_base.den,
-                  outputCodecContext->time_base.num, outputCodecContext->time_base.den, INT_MAX);
-        
-        switch (outputCodecContext->codec_type) {
-            case AVMEDIA_TYPE_AUDIO:
-                outputCodecContext->channel_layout     = inputCodecContext->channel_layout;
-                outputCodecContext->sample_rate        = inputCodecContext->sample_rate;
-                outputCodecContext->channels           = inputCodecContext->channels;
-                outputCodecContext->frame_size         = inputCodecContext->frame_size;
-                outputCodecContext->audio_service_type = inputCodecContext->audio_service_type;
-                outputCodecContext->block_align        = inputCodecContext->block_align;
-                if((outputCodecContext->block_align == 1 || outputCodecContext->block_align == 1152 || outputCodecContext->block_align == 576) && outputCodecContext->codec_id == AV_CODEC_ID_MP3)
-                    outputCodecContext->block_align= 0;
-                if(outputCodecContext->codec_id == AV_CODEC_ID_AC3)
-                    outputCodecContext->block_align= 0;
-                break;
-            case AVMEDIA_TYPE_VIDEO:
-                outputCodecContext->pix_fmt            = inputCodecContext->pix_fmt;
-                outputCodecContext->width              = inputCodecContext->width;
-                outputCodecContext->height             = inputCodecContext->height;
-                outputCodecContext->has_b_frames       = inputCodecContext->has_b_frames;
-                if (inputStream.stream->sample_aspect_ratio.num)
-                    sar = inputStream.stream->sample_aspect_ratio;
-                else
-                    sar = inputCodecContext->sample_aspect_ratio;
-                outputStream.stream->sample_aspect_ratio = inputCodecContext->sample_aspect_ratio = sar;
-                outputStream.stream->avg_frame_rate = inputStream.stream->avg_frame_rate;                    break;
-            case AVMEDIA_TYPE_SUBTITLE:
-                outputCodecContext->width  = inputCodecContext->width;
-                outputCodecContext->height = inputCodecContext->height;
-                break;
-            case AVMEDIA_TYPE_DATA:
-            case AVMEDIA_TYPE_ATTACHMENT:
-                break;
-            default:
-                abort();
-        }
-        /* Some formats want stream headers to be separate. */
-        if (outputFile.formatContext->oformat->flags & AVFMT_GLOBALHEADER)
-            outputCodecContext->flags |= CODEC_FLAG_GLOBAL_HEADER;
+        avcodec_copy_context(outputCodecContext, inputCodecContext);
     }
 }
-
-
-
 
 - (void) finishWithSuccess:(BOOL)success error:(NSError*)error completionBlock:(FFmpegWrapperCompletionBlock)completionBlock {
     if (completionBlock) {
@@ -294,7 +99,6 @@
         outputFile = [[FFOutputFile alloc] initWithPath:outputPath options:options];
         
         // Copy settings from input context to output context for direct stream copy
-
         [self setupDirectStreamCopyFromInputFile:inputFile outputFile:outputFile];
         
         // Open the output file for writing and write header
@@ -326,10 +130,8 @@
             FFInputStream *inputStream = [inputFile.streams objectAtIndex:packet->stream_index];
             FFOutputStream *outputStream = [outputFile.streams objectAtIndex:packet->stream_index];
             
-            
-            [inputStream scaleInputPacketTimeScale:packet];
-            AVPacket *outputPacket = [self processInputStream:inputStream outputStream:outputStream packet:packet];
-            
+            packet->pts = av_rescale_q(packet->pts, inputStream.stream->time_base, outputStream.stream->time_base);
+            packet->dts = av_rescale_q(packet->dts, inputStream.stream->time_base, outputStream.stream->time_base);
             
             totalBytesRead += packet->size;
             
@@ -344,7 +146,6 @@
                 });
             }
             av_free_packet(packet);
-            av_free_packet(outputPacket);
         }
 
         if (![outputFile writeTrailerWithError:&error]) {

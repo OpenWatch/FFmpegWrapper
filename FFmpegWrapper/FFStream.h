@@ -9,7 +9,7 @@
 #import <Foundation/Foundation.h>
 #import "libavformat/avformat.h"
 
-@class FFFile;
+@class FFFile, FFInputStream, FFOutputStream;
 
 @interface FFStream : NSObject
 @property (nonatomic, weak) FFFile *parentFile;

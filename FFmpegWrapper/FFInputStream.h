@@ -25,7 +25,4 @@
 @property (nonatomic) double timestampScale;
 
 - (id) initWithInputFile:(FFInputFile*)newInputFile stream:(AVStream*)newStream;
-
-- (void) scaleInputPacketTimeScale:(AVPacket*)packet;
-
 @end

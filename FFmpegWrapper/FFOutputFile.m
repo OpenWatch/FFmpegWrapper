@@ -135,43 +135,12 @@ NSString const *kFFmpegOutputFormatKey = @"kFFmpegOutputFormatKey";
     if (outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO) {
         for (FFBitstreamFilter *bsf in bitstreamFilters) {
             AVPacket newPacket = [self applyBitstreamFilter:bsf.bitstreamFilterContext packet:packet outputCodecContext:outputCodecContext];
+            av_free_packet(packet);
             packet = &newPacket;
         }
-        
     }
     
-    if (!(self.formatContext->oformat->flags & AVFMT_NOTIMESTAMPS) &&
-        (outputCodecContext->codec_type == AVMEDIA_TYPE_AUDIO || outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO) &&
-        packet->dts != AV_NOPTS_VALUE &&
-        ffOutputStream.lastMuxDTS != AV_NOPTS_VALUE) {
-        int64_t max = ffOutputStream.lastMuxDTS + !(self.formatContext->oformat->flags & AVFMT_TS_NONSTRICT);
-        if (packet->dts < max) {
-            int loglevel = max - packet->dts > 2 || outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO ? AV_LOG_WARNING : AV_LOG_DEBUG;
-            av_log(self.formatContext, loglevel, "Non-monotonous DTS in output stream "
-                   "%d:%d; previous: %"PRId64", current: %"PRId64"; ",
-                   0, outputStream->index, ffOutputStream.lastMuxDTS, packet->dts);
-            
-            av_log(self.formatContext, loglevel, "changing to %"PRId64". This may result "
-                   "in incorrect timestamps in the output file.\n",
-                   max);
-            if(packet->pts >= packet->dts)
-                packet->pts = FFMAX(packet->pts, max);
-            packet->dts = max;
-        }
-    }
     ffOutputStream.lastMuxDTS = packet->dts;
-    
-    // Not sure if commenting this out will have side-effects
-    //pkt->stream_index = ost->index;
-    BOOL debug_ts = TRUE;
-    if (debug_ts) {
-        NSLog(@"muxer <- type:%s "
-              "pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s size:%d\n",
-              av_get_media_type_string(outputStream->codec->codec_type),
-              av_ts2str(packet->pts), av_ts2timestr(packet->pts, &outputStream->time_base),
-              av_ts2str(packet->dts), av_ts2timestr(packet->dts, &outputStream->time_base),
-              packet->size);
-    }
     
     int writeFrameValue = av_interleaved_write_frame(self.formatContext, packet);
     if (writeFrameValue < 0) {
