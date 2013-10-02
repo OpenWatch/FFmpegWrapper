@@ -67,7 +67,9 @@ NSString const *kFFmpegOutputFormatKey = @"kFFmpegOutputFormatKey";
     if (!(formatContext->oformat->flags & AVFMT_NOFILE)) {
         int returnValue = avio_open(&formatContext->pb, [self.path UTF8String], AVIO_FLAG_WRITE);
         if (returnValue < 0) {
-            *error = [FFUtilities errorForAVError:returnValue];
+            if (error != NULL) {
+                *error = [FFUtilities errorForAVError:returnValue];
+            }
             return NO;
         }
     }
@@ -80,7 +82,9 @@ NSString const *kFFmpegOutputFormatKey = @"kFFmpegOutputFormatKey";
     // Write header for output file
     int writeHeaderValue = avformat_write_header(self.formatContext, &options);
     if (writeHeaderValue < 0) {
-        *error = [FFUtilities errorForAVError:writeHeaderValue];
+        if (error != NULL) {
+            *error = [FFUtilities errorForAVError:writeHeaderValue];
+        }
         av_dict_free(&options);
         return NO;
     }
@@ -144,7 +148,9 @@ NSString const *kFFmpegOutputFormatKey = @"kFFmpegOutputFormatKey";
     
     int writeFrameValue = av_interleaved_write_frame(self.formatContext, packet);
     if (writeFrameValue < 0) {
-        *error = [FFUtilities errorForAVError:writeFrameValue];
+        if (error != NULL) {
+            *error = [FFUtilities errorForAVError:writeFrameValue];
+        }
         return NO;
     }
     outputStream->codec->frame_number++;
@@ -154,7 +160,9 @@ NSString const *kFFmpegOutputFormatKey = @"kFFmpegOutputFormatKey";
 - (BOOL) writeTrailerWithError:(NSError *__autoreleasing *)error {
     int writeTrailerValue = av_write_trailer(formatContext);
     if (writeTrailerValue < 0) {
-        *error = [FFUtilities errorForAVError:writeTrailerValue];
+        if (error != NULL) {
+            *error = [FFUtilities errorForAVError:writeTrailerValue];
+        }
         return NO;
     }
     return YES;

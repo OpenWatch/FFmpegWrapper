@@ -74,7 +74,9 @@ NSString const *kFFmpegInputFormatKey = @"kFFmpegInputFormatKey";
     if (frameReadValue != 0) {
         continueReading = NO;
         if (frameReadValue != AVERROR_EOF) {
-            *error = [FFUtilities errorForAVError:frameReadValue];
+            if (error != NULL) {
+                *error = [FFUtilities errorForAVError:frameReadValue];
+            }
         }
         av_free_packet(packet);
     }
