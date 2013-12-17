@@ -17,10 +17,23 @@
         self.lastMuxDTS = AV_NOPTS_VALUE;
         self.frameNumber = 0;
         
-        AVCodec *codec = avcodec_find_encoder_by_name([outputCodec UTF8String]);
-        self.stream = avformat_new_stream(outputFile.formatContext, codec);
+        _codec = avcodec_find_encoder_by_name([outputCodec UTF8String]);
+        self.stream = avformat_new_stream(outputFile.formatContext, _codec);
         [outputFile addOutputStream:self];
     }
     return self;
 }
+
+- (void) setupVideoContextWithWidth:(int)width height:(int)height {
+    AVCodecContext *c = self.stream->codec;
+    avcodec_get_context_defaults3(c, _codec);
+    c->width    = width;
+	c->height   = height;
+    c->time_base.den = 30;
+	c->time_base.num = 1;
+    c->pix_fmt       = PIX_FMT_YUV420P;
+	if (self.parentFile.formatContext->oformat->flags & AVFMT_GLOBALHEADER)
+		c->flags |= CODEC_FLAG_GLOBAL_HEADER;
+}
+
 @end
