@@ -17,8 +17,9 @@
         self.lastMuxDTS = AV_NOPTS_VALUE;
         self.frameNumber = 0;
         
-        _codec = avcodec_find_encoder_by_name([outputCodec UTF8String]);
-        self.stream = avformat_new_stream(outputFile.formatContext, _codec);
+        //_codec = avcodec_find_encoder_by_name([outputCodec UTF8String]);
+        //_codec = avcodec_find_encoder();
+        self.stream = avformat_new_stream(outputFile.formatContext, NULL);
         [outputFile addOutputStream:self];
     }
     return self;
@@ -26,7 +27,8 @@
 
 - (void) setupVideoContextWithWidth:(int)width height:(int)height {
     AVCodecContext *c = self.stream->codec;
-    avcodec_get_context_defaults3(c, _codec);
+    avcodec_get_context_defaults3(c, NULL);
+    c->codec_id = CODEC_ID_H264;
     c->width    = width;
 	c->height   = height;
     c->time_base.den = 30;

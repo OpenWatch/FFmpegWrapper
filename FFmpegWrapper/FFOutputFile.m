@@ -136,12 +136,16 @@ NSString const *kFFmpegOutputFormatKey = @"kFFmpegOutputFormatKey";
     
     AVCodecContext *outputCodecContext = outputStream->codec;
     
-    if (outputCodecContext->codec_type == AVMEDIA_TYPE_VIDEO) {
+    //NSData *packetData = [NSData dataWithBytesNoCopy:packet->data length:packet->size freeWhenDone:NO];
+    //NSLog(@"Org: %@", packetData);
+    if (outputCodecContext->codec_id == AV_CODEC_ID_H264) {
         for (FFBitstreamFilter *bsf in bitstreamFilters) {
             AVPacket newPacket = [self applyBitstreamFilter:bsf.bitstreamFilterContext packet:packet outputCodecContext:outputCodecContext];
             av_free_packet(packet);
             packet = &newPacket;
         }
+        //NSData *bsfData = [NSData dataWithBytesNoCopy:packet->data length:packet->size freeWhenDone:NO];
+        //NSLog(@"bsf: %@", bsfData);
     }
     
     ffOutputStream.lastMuxDTS = packet->dts;
