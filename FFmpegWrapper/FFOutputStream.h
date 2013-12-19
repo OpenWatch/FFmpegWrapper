@@ -19,5 +19,6 @@
 - (id) initWithOutputFile:(FFOutputFile*)outputFile outputCodec:(NSString*)outputCodec;
 
 - (void) setupVideoContextWithWidth:(int)width height:(int)height;
+- (void) setupAudioContextWithSampleRate:(int)sampleRate;
 
 @end
