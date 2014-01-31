@@ -29,6 +29,7 @@
     AVCodecContext *c = self.stream->codec;
     avcodec_get_context_defaults3(c, NULL);
     c->codec_id = CODEC_ID_H264;
+    c->codec_type = AVMEDIA_TYPE_VIDEO;
     c->width    = width;
 	c->height   = height;
     c->time_base.den = 30;
@@ -43,8 +44,7 @@
     /* find the audio encoder */
     avcodec_get_context_defaults3(codecContext, NULL);
 	codecContext->codec_id = CODEC_ID_AAC;
-	
-    
+	codecContext->codec_type = AVMEDIA_TYPE_AUDIO;
     
 	//st->id = 1;
 	codecContext->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL; // for native aac support
