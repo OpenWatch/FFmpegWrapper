@@ -27,6 +27,7 @@
 #import "libavcodec/avcodec.h"
 #import "libavutil/intreadwrite.h"
 #import "libavutil/timestamp.h"
+#import "libavutil/log.h"
 
 #import "FFInputFile.h"
 #import "FFOutputFile.h"
@@ -54,6 +55,12 @@
         av_register_all();
         avformat_network_init();
         avcodec_register_all();
+#if DEBUG
+        av_log_set_level(AV_LOG_VERBOSE);
+#else
+        av_log_set_level(AV_LOG_QUIET);
+#endif
+
     }
     return self;
 }
