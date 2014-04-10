@@ -11,5 +11,5 @@ Pod::Spec.new do |s|
   s.ios.deployment_target = '6.0'
   s.requires_arc = true
 
-  s.dependency 'FFmpeg-iOS', '~> 2.2'
+  s.dependency 'FFmpeg', '~> 2.2'
 end
