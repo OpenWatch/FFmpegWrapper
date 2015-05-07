@@ -7,6 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		94FE4DA51AFB334700A4A49F /* libcrypto.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 94FE4DA21AFB334700A4A49F /* libcrypto.a */; };
+		94FE4DA61AFB334700A4A49F /* librtmp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 94FE4DA31AFB334700A4A49F /* librtmp.a */; };
+		94FE4DA71AFB334700A4A49F /* libssl.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 94FE4DA41AFB334700A4A49F /* libssl.a */; };
+		94FE4DBC1AFB343200A4A49F /* FFBitstreamFilter.m in Sources */ = {isa = PBXBuildFile; fileRef = 94FE4DAD1AFB343200A4A49F /* FFBitstreamFilter.m */; };
+		94FE4DBD1AFB343200A4A49F /* FFFile.m in Sources */ = {isa = PBXBuildFile; fileRef = 94FE4DAF1AFB343200A4A49F /* FFFile.m */; };
+		94FE4DBE1AFB343200A4A49F /* FFInputFile.m in Sources */ = {isa = PBXBuildFile; fileRef = 94FE4DB11AFB343200A4A49F /* FFInputFile.m */; };
+		94FE4DBF1AFB343200A4A49F /* FFInputStream.m in Sources */ = {isa = PBXBuildFile; fileRef = 94FE4DB31AFB343200A4A49F /* FFInputStream.m */; };
+		94FE4DC01AFB343200A4A49F /* FFOutputFile.m in Sources */ = {isa = PBXBuildFile; fileRef = 94FE4DB51AFB343200A4A49F /* FFOutputFile.m */; };
+		94FE4DC11AFB343200A4A49F /* FFOutputStream.m in Sources */ = {isa = PBXBuildFile; fileRef = 94FE4DB71AFB343200A4A49F /* FFOutputStream.m */; };
+		94FE4DC21AFB343200A4A49F /* FFStream.m in Sources */ = {isa = PBXBuildFile; fileRef = 94FE4DB91AFB343200A4A49F /* FFStream.m */; };
+		94FE4DC31AFB343200A4A49F /* FFUtilities.m in Sources */ = {isa = PBXBuildFile; fileRef = 94FE4DBB1AFB343200A4A49F /* FFUtilities.m */; };
 		D95F88DA17E8C259000ADE35 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D95F88D917E8C259000ADE35 /* Foundation.framework */; };
 		D95F88DF17E8C259000ADE35 /* FFmpegWrapper.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = D95F88DE17E8C259000ADE35 /* FFmpegWrapper.h */; };
 		D95F88E117E8C259000ADE35 /* FFmpegWrapper.m in Sources */ = {isa = PBXBuildFile; fileRef = D95F88E017E8C259000ADE35 /* FFmpegWrapper.m */; };
@@ -49,6 +60,25 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		94FE4DA21AFB334700A4A49F /* libcrypto.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libcrypto.a; sourceTree = "<group>"; };
+		94FE4DA31AFB334700A4A49F /* librtmp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = librtmp.a; sourceTree = "<group>"; };
+		94FE4DA41AFB334700A4A49F /* libssl.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libssl.a; sourceTree = "<group>"; };
+		94FE4DAC1AFB343200A4A49F /* FFBitstreamFilter.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FFBitstreamFilter.h; sourceTree = "<group>"; };
+		94FE4DAD1AFB343200A4A49F /* FFBitstreamFilter.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FFBitstreamFilter.m; sourceTree = "<group>"; };
+		94FE4DAE1AFB343200A4A49F /* FFFile.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FFFile.h; sourceTree = "<group>"; };
+		94FE4DAF1AFB343200A4A49F /* FFFile.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FFFile.m; sourceTree = "<group>"; };
+		94FE4DB01AFB343200A4A49F /* FFInputFile.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FFInputFile.h; sourceTree = "<group>"; };
+		94FE4DB11AFB343200A4A49F /* FFInputFile.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FFInputFile.m; sourceTree = "<group>"; };
+		94FE4DB21AFB343200A4A49F /* FFInputStream.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FFInputStream.h; sourceTree = "<group>"; };
+		94FE4DB31AFB343200A4A49F /* FFInputStream.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FFInputStream.m; sourceTree = "<group>"; };
+		94FE4DB41AFB343200A4A49F /* FFOutputFile.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FFOutputFile.h; sourceTree = "<group>"; };
+		94FE4DB51AFB343200A4A49F /* FFOutputFile.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FFOutputFile.m; sourceTree = "<group>"; };
+		94FE4DB61AFB343200A4A49F /* FFOutputStream.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FFOutputStream.h; sourceTree = "<group>"; };
+		94FE4DB71AFB343200A4A49F /* FFOutputStream.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FFOutputStream.m; sourceTree = "<group>"; };
+		94FE4DB81AFB343200A4A49F /* FFStream.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FFStream.h; sourceTree = "<group>"; };
+		94FE4DB91AFB343200A4A49F /* FFStream.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FFStream.m; sourceTree = "<group>"; };
+		94FE4DBA1AFB343200A4A49F /* FFUtilities.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FFUtilities.h; sourceTree = "<group>"; };
+		94FE4DBB1AFB343200A4A49F /* FFUtilities.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FFUtilities.m; sourceTree = "<group>"; };
 		D95F88D617E8C259000ADE35 /* libFFmpegWrapper.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libFFmpegWrapper.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		D95F88D917E8C259000ADE35 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		D95F88DD17E8C259000ADE35 /* FFmpegWrapper-Prefix.pch */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "FFmpegWrapper-Prefix.pch"; sourceTree = "<group>"; };
@@ -151,7 +181,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				94FE4DA61AFB334700A4A49F /* librtmp.a in Frameworks */,
 				D9CF4BA117E8CA1A00E7EE87 /* libavutil.a in Frameworks */,
+				94FE4DA71AFB334700A4A49F /* libssl.a in Frameworks */,
 				D9CF4B9F17E8CA1A00E7EE87 /* libavfilter.a in Frameworks */,
 				D95F88DA17E8C259000ADE35 /* Foundation.framework in Frameworks */,
 				D9CF4B9E17E8CA1A00E7EE87 /* libavdevice.a in Frameworks */,
@@ -159,6 +191,7 @@
 				D9CF4BA017E8CA1A00E7EE87 /* libavformat.a in Frameworks */,
 				D9CF4BA217E8CA1A00E7EE87 /* libswresample.a in Frameworks */,
 				D9CF4B9D17E8CA1A00E7EE87 /* libavcodec.a in Frameworks */,
+				94FE4DA51AFB334700A4A49F /* libcrypto.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -209,6 +242,22 @@
 		D95F88DB17E8C259000ADE35 /* FFmpegWrapper */ = {
 			isa = PBXGroup;
 			children = (
+				94FE4DAC1AFB343200A4A49F /* FFBitstreamFilter.h */,
+				94FE4DAD1AFB343200A4A49F /* FFBitstreamFilter.m */,
+				94FE4DAE1AFB343200A4A49F /* FFFile.h */,
+				94FE4DAF1AFB343200A4A49F /* FFFile.m */,
+				94FE4DB01AFB343200A4A49F /* FFInputFile.h */,
+				94FE4DB11AFB343200A4A49F /* FFInputFile.m */,
+				94FE4DB21AFB343200A4A49F /* FFInputStream.h */,
+				94FE4DB31AFB343200A4A49F /* FFInputStream.m */,
+				94FE4DB41AFB343200A4A49F /* FFOutputFile.h */,
+				94FE4DB51AFB343200A4A49F /* FFOutputFile.m */,
+				94FE4DB61AFB343200A4A49F /* FFOutputStream.h */,
+				94FE4DB71AFB343200A4A49F /* FFOutputStream.m */,
+				94FE4DB81AFB343200A4A49F /* FFStream.h */,
+				94FE4DB91AFB343200A4A49F /* FFStream.m */,
+				94FE4DBA1AFB343200A4A49F /* FFUtilities.h */,
+				94FE4DBB1AFB343200A4A49F /* FFUtilities.m */,
 				D95F88DE17E8C259000ADE35 /* FFmpegWrapper.h */,
 				D95F88E017E8C259000ADE35 /* FFmpegWrapper.m */,
 				D95F88DC17E8C259000ADE35 /* Supporting Files */,
@@ -386,6 +435,9 @@
 		D9CF4B9517E8CA1A00E7EE87 /* lib */ = {
 			isa = PBXGroup;
 			children = (
+				94FE4DA21AFB334700A4A49F /* libcrypto.a */,
+				94FE4DA31AFB334700A4A49F /* librtmp.a */,
+				94FE4DA41AFB334700A4A49F /* libssl.a */,
 				D9CF4B9617E8CA1A00E7EE87 /* libavcodec.a */,
 				D9CF4B9717E8CA1A00E7EE87 /* libavdevice.a */,
 				D9CF4B9817E8CA1A00E7EE87 /* libavfilter.a */,
@@ -496,7 +548,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				94FE4DC11AFB343200A4A49F /* FFOutputStream.m in Sources */,
+				94FE4DBF1AFB343200A4A49F /* FFInputStream.m in Sources */,
+				94FE4DC31AFB343200A4A49F /* FFUtilities.m in Sources */,
+				94FE4DBE1AFB343200A4A49F /* FFInputFile.m in Sources */,
+				94FE4DBD1AFB343200A4A49F /* FFFile.m in Sources */,
 				D95F88E117E8C259000ADE35 /* FFmpegWrapper.m in Sources */,
+				94FE4DC21AFB343200A4A49F /* FFStream.m in Sources */,
+				94FE4DC01AFB343200A4A49F /* FFOutputFile.m in Sources */,
+				94FE4DBC1AFB343200A4A49F /* FFBitstreamFilter.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -614,6 +674,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/Submodules/FFmpeg-iOS/dependencies/lib",
+					"$(PROJECT_DIR)/Submodules/FFmpeg-iOS/dependencies/lib",
 				);
 				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -635,6 +696,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/Submodules/FFmpeg-iOS/dependencies/lib",
+					"$(PROJECT_DIR)/Submodules/FFmpeg-iOS/dependencies/lib",
 				);
 				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_NAME = "$(TARGET_NAME)";
