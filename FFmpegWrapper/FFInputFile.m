@@ -10,7 +10,9 @@
 #import "FFInputStream.h"
 #import "FFUtilities.h"
 
-NSString const *kFFmpegInputFormatKey = @"kFFmpegInputFormatKey";
+NSString* const kFFmpegInputFormatKey = @"kFFmpegInputFormatKey";
+NSString* const kFFmpegMovFlag = @"movflags";
+NSString* const kFFmpegCodecFlag = @"codec";
 
 @implementation FFInputFile
 @synthesize endOfFileReached, timestampOffset, lastTimestamp, formatContext;
@@ -24,10 +26,21 @@ NSString const *kFFmpegInputFormatKey = @"kFFmpegInputFormatKey";
     AVFormatContext *inputFormatContext = NULL;
     AVInputFormat *inputFormat = NULL;
     AVDictionary *inputOptions = NULL;
+
     
     NSString *inputFormatString = [options objectForKey:kFFmpegInputFormatKey];
     if (inputFormatString) {
         inputFormat = av_find_input_format([inputFormatString UTF8String]);
+    }
+    
+    NSString* movFlags = [options objectForKey:kFFmpegMovFlag];
+    if (movFlags) {
+        av_dict_set(&inputOptions, "movflags", [movFlags UTF8String], 0);
+    }
+    
+    NSString* codec = [options objectForKey:kFFmpegCodecFlag];
+    if (codec) {
+        av_dict_set(&inputOptions, "codec", [codec UTF8String], 0);
     }
     
     // It's possible to send more options to the parser

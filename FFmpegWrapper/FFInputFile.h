@@ -9,6 +9,7 @@
 #import "FFFile.h"
 
 @interface FFInputFile : FFFile
+
 @property (nonatomic) BOOL endOfFileReached;
 @property (nonatomic) int64_t timestampOffset;
 @property (nonatomic) int64_t lastTimestamp;
