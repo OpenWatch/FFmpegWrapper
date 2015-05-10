@@ -19,7 +19,7 @@ NSString const *kFFmpegOutputFormatKey = @"kFFmpegOutputFormatKey";
 @end
 
 @implementation FFOutputFile
-@synthesize startTime, formatContext, bitstreamFilters;
+@synthesize startTime, formatContext, bitstreamFilters, streams = _streams;;
 
 - (void) addBitstreamFilter:(FFBitstreamFilter *)bitstreamFilter {
     [bitstreamFilters addObject:bitstreamFilter];
