@@ -52,6 +52,9 @@ typedef void(^FFmpegWrapperProgressBlock)(NSUInteger bytesRead, uint64_t totalBy
  */
 extern NSString const *kFFmpegInputFormatKey;
 
+extern NSString* const kFFmpegMovFlag;
+extern NSString* const kFFmpegCodecFlag;
+
 /**
  Required. This controls the type of container for the output format. Accepts NSString values like @"mp4", @"avi", @"mpegts". For a full list of supported formats please consult `$ ffmpeg -formats`.
  */
